@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,14 +23,29 @@ import com.mrd.bitlib.model.UnspentTransactionOutput;
 public class TransactionUtils {
 
    /**
-    * The default miner fee which we base our fee calculation on
+    * The miner fee per 1000 bytes used by Bitcoin Core 0.9.x for block inclusion
     */
-   public static final long DEFAULT_MINER_FEE = 10000;
-   
+   public static final long INCLUDE_IN_BLOCK_FEE = 1000; // 0.00001
+
+   /**
+    * The minimum fee (except for high priority transactions) to pay per 1000 bytes
+    */
+   public static final long MINIMUM_KB_FEE = INCLUDE_IN_BLOCK_FEE;
+
+   /**
+    * The default fee which we base our fee calculation on
+    */
+   public static final long DEFAULT_KB_FEE = 10000; // 0.0001
+
+   /**
+    * a generous fee which makes a transaction more likely to confirm fast
+    */
+   public static final long GENEROUS_KB_FEE = DEFAULT_KB_FEE * 2;
+
    /**
     * The minimum output value allowed when relaying transactions
     */
-   public static final long MINIMUM_OUTPUT_VALUE = 5430;
+   public static final long MINIMUM_OUTPUT_VALUE = 5460;
 
    /**
     * The priority threshold at which a transaction is considered to be high
@@ -58,35 +73,40 @@ public class TransactionUtils {
     * @param blockchainHeight
     *           the current block chain height
     */
-   public static boolean hasInSufficientFees(Transaction tx, UnspentTransactionOutput[] funding, int blockchainHeight) {
+   public static boolean hasInSufficientFees(Transaction tx, UnspentTransactionOutput[] funding, int blockchainHeight, long minerFeeToUse) {
       // Can this transaction be sent without a fee?
-      long txPriority = calcuateTransactionPriority(tx, funding, blockchainHeight);
+      long txPriority = calculateTransactionPriority(tx, funding, blockchainHeight);
       int txSize = tx.toBytes().length;
       long minOutoutSize = calculateMinOutputValue(tx);
       if (txPriority > HIGH_PRIORITY_THRESHOLD && minOutoutSize >= HIGH_PRIORITY_MIN_OUTPUT_SIZE
             && txSize < HIGH_PRIORITY_MAX_TX_SIZE) {
          // High priority transaction, can be sent without a fee
-         return true;
+         return false;
       }
 
       // A fee is required, does it pay enough fees?
-      long feePaid = calculateFeePaid(tx);
-      long feeRequired = calculateFeeRequired(txSize);
+      long feePaid = calculateFeePaid(tx, funding);
+      long feeRequired = calculateFeeRequired(txSize, minerFeeToUse);
       return feePaid < feeRequired;
    }
 
-   private static long calculateFeeRequired(int txSize) {
-      long minFee = (1 + (txSize / 1000)) * DEFAULT_MINER_FEE;
+   public static long calculateFeeRequired(int txSize, long minerFeeToUse) {
+      long minFee = (1 + (txSize / 1000)) * minerFeeToUse;
       return minFee;
    }
 
-   private static long calculateFeePaid(Transaction tx) {
+   private static long calculateFeePaid(Transaction tx, UnspentTransactionOutput[] funding) {
       long fee = 0;
+      for (UnspentTransactionOutput in : funding) {
+         fee += in.value;
+      }
       for (TransactionOutput out : tx.outputs) {
-         fee += out.value;
+         fee -= out.value;
       }
       return fee;
    }
+
+
 
    private static long calculateMinOutputValue(Transaction tx) {
       long min = Long.MAX_VALUE;
@@ -107,7 +127,7 @@ public class TransactionUtils {
     *           the current block chain height
     * @return the priority of this transaction
     */
-   public static long calcuateTransactionPriority(Transaction tx, UnspentTransactionOutput[] funding, int blockchainHeight) {
+   public static long calculateTransactionPriority(Transaction tx, UnspentTransactionOutput[] funding, int blockchainHeight) {
       long sum = 0;
       for (UnspentTransactionOutput output : funding) {
          int confirmations = output.height == -1 ? 0 : blockchainHeight - output.height + 1;

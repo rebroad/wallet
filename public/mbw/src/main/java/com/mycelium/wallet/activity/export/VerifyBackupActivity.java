@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -40,15 +40,17 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.TextView;
-import android.widget.Toast;
-
-import com.google.common.base.Preconditions;
-import com.mycelium.wallet.MbwManager;
-import com.mycelium.wallet.R;
-import com.mycelium.wallet.Record;
-import com.mycelium.wallet.RecordManager;
-import com.mycelium.wallet.Utils;
+import com.google.common.base.Optional;
+import com.mrd.bitlib.crypto.InMemoryPrivateKey;
+import com.mrd.bitlib.model.Address;
+import com.mycelium.wallet.*;
 import com.mycelium.wallet.activity.ScanActivity;
+import com.mycelium.wallet.activity.StringHandlerActivity;
+import com.mycelium.wallet.persistence.MetadataStorage;
+import com.mycelium.wapi.wallet.WalletAccount;
+import com.mycelium.wapi.wallet.single.SingleAddressAccount;
+
+import java.util.UUID;
 
 public class VerifyBackupActivity extends Activity {
 
@@ -60,7 +62,6 @@ public class VerifyBackupActivity extends Activity {
    }
 
    private MbwManager _mbwManager;
-   private RecordManager _recordManager;
 
    @Override
    public void onCreate(Bundle savedInstanceState) {
@@ -69,13 +70,12 @@ public class VerifyBackupActivity extends Activity {
       setContentView(R.layout.verify_backup_activity);
 
       _mbwManager = MbwManager.getInstance(this.getApplication());
-      _recordManager = _mbwManager.getRecordManager();
 
       findViewById(R.id.btScan).setOnClickListener(new android.view.View.OnClickListener() {
 
          @Override
          public void onClick(View v) {
-            ScanActivity.callMe(VerifyBackupActivity.this, SCAN_RESULT_CODE);
+            ScanActivity.callMe(VerifyBackupActivity.this, SCAN_RESULT_CODE, StringHandleConfig.verifySeedOrKey());
          }
 
       });
@@ -95,8 +95,8 @@ public class VerifyBackupActivity extends Activity {
 
    private boolean hasPrivateKeyOnClipboard() {
       String clipboardString = Utils.getClipboardString(this);
-      Record record = Record.fromString(clipboardString, _mbwManager.getNetwork());
-      return record != null && record.hasPrivateKey();
+      Optional<InMemoryPrivateKey> pk = InMemoryPrivateKey.fromBase58String(clipboardString, _mbwManager.getNetwork());
+      return pk.isPresent();
    }
 
    @Override
@@ -113,49 +113,68 @@ public class VerifyBackupActivity extends Activity {
 
    private void updateUi() {
       TextView tvNumKeys = (TextView) findViewById(R.id.tvNumKeys);
+      String infotext = "";
+      if (_mbwManager.getWalletManager(false).hasBip32MasterSeed()
+            && _mbwManager.getMetadataStorage().getMasterSeedBackupState().equals(MetadataStorage.BackupState.UNKNOWN)) {
+         infotext = getString(R.string.verify_backup_master_seed) + "\n";
+      }
+
       int num = countKeysToVerify();
-      if (num == 0) {
+      if (num == 1) {
+         infotext = infotext + getString(R.string.verify_backup_one_key);
+      } else if (num > 0) {
+         infotext = infotext + getString(R.string.verify_backup_num_keys, Integer.toString(num));
+      }
+
+      if (infotext.length() == 0) {
          tvNumKeys.setVisibility(View.GONE);
-      } else if (num == 1) {
-         tvNumKeys.setVisibility(View.VISIBLE);
-         tvNumKeys.setText(getResources().getString(R.string.verify_backup_one_key));
       } else {
          tvNumKeys.setVisibility(View.VISIBLE);
-         tvNumKeys.setText(getResources().getString(R.string.verify_backup_num_keys, num));
+         tvNumKeys.setText(infotext);
       }
    }
 
    private int countKeysToVerify() {
       int num = 0;
-      for (Record record : _recordManager.getAllRecords()) {
-         if (record.needsBackupVerification()) {
-            num++;
+      for (UUID accountid : _mbwManager.getWalletManager(false).getAccountIds()) {
+         WalletAccount account = _mbwManager.getWalletManager(false).getAccount(accountid);
+         MetadataStorage.BackupState backupState = _mbwManager.getMetadataStorage().getOtherAccountBackupState(accountid);
+
+         if (backupState!= MetadataStorage.BackupState.IGNORED) {
+            boolean needsBackup = account instanceof SingleAddressAccount
+                  && account.canSpend()
+                  && backupState != MetadataStorage.BackupState.VERIFIED;
+            if (needsBackup) {
+               num++;
+            }
          }
       }
       return num;
    }
 
    private void verifyClipboardPrivateKey(String keyString) {
-      Record record = Record.fromString(keyString, _mbwManager.getNetwork());
-      if (record != null) {
-         verify(record);
+      Optional<InMemoryPrivateKey> pk = InMemoryPrivateKey.fromBase58String(keyString, _mbwManager.getNetwork());
+      if (pk.isPresent()) {
+         verify(pk.get());
          return;
       }
 
-      Toast.makeText(VerifyBackupActivity.this, R.string.unrecognized_private_key_format, Toast.LENGTH_SHORT).show();
+      ShowDialogMessage(R.string.unrecognized_private_key_format, false);
    }
 
-   private void verify(Record record) {
-      if (!record.hasPrivateKey()) {
-         Toast.makeText(VerifyBackupActivity.this, R.string.unrecognized_private_key_format, Toast.LENGTH_SHORT).show();
-         return;
-      }
+   private void verify(InMemoryPrivateKey pk) {
 
-      // Do verification
-      boolean success = _mbwManager.getRecordManager().verifyPrivateKeyBackup(record.key);
-      updateUi();
+      // Figure out the account ID
+      Address address = pk.getPublicKey().toAddress(_mbwManager.getNetwork());
+      UUID account = SingleAddressAccount.calculateId(address);
+
+      // Check whether regular wallet contains that account
+      boolean success = _mbwManager.getWalletManager(false).hasAccount(account);
+
       if (success) {
-         String message = getResources().getString(R.string.verify_backup_ok, record.address.toMultiLineString());
+         _mbwManager.getMetadataStorage().setOtherAccountBackupState(account, MetadataStorage.BackupState.VERIFIED);
+         updateUi();
+         String message = getResources().getString(R.string.verify_backup_ok, address.toMultiLineString());
          ShowDialogMessage(message, false);
       } else {
          ShowDialogMessage(R.string.verify_backup_no_such_record, false);
@@ -174,16 +193,15 @@ public class VerifyBackupActivity extends Activity {
    public void onActivityResult(final int requestCode, final int resultCode, final Intent intent) {
       if (requestCode == SCAN_RESULT_CODE) {
          if (resultCode == RESULT_OK) {
-            Record record = (Record) intent.getSerializableExtra(ScanActivity.RESULT_RECORD_KEY);
-            Preconditions.checkNotNull(record);
-            verify(record);
+            String message = getResources().getString(R.string.verify_backup_ok_message);
+            ShowDialogMessage(message, false);
+            updateUi();
          } else {
-            String error = intent.getStringExtra(ScanActivity.RESULT_ERROR);
+            String error = intent.getStringExtra(StringHandlerActivity.RESULT_ERROR);
             if (error != null) {
-               Toast.makeText(this, error, Toast.LENGTH_LONG).show();
+               ShowDialogMessage(error, false);
             }
          }
       }
    }
-
 }

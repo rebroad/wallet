@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -114,7 +114,6 @@ public class CreateTradeActivity extends Activity implements NumberEntryListener
    }
 
    OnClickListener startTradingClickListener = new OnClickListener() {
-
       @Override
       public void onClick(View v) {
          CreateTrade request = new CreateTrade(_adSearchItem.id, getNumber());
@@ -137,12 +136,7 @@ public class CreateTradeActivity extends Activity implements NumberEntryListener
    }
 
    @Override
-   protected void onPause() {
-      super.onPause();
-   }
-
-   @Override
-   public void onEntryChanged(String entry) {
+   public void onEntryChanged(String entry, boolean wasSet) {
       updateUi();
    }
 

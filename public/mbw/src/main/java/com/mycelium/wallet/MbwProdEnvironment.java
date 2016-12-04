@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,14 +34,16 @@
 
 package com.mycelium.wallet;
 
-import android.util.Log;
 
 import com.mrd.bitlib.model.NetworkParameters;
-import com.mrd.mbwapi.api.MyceliumWalletApi;
-import com.mrd.mbwapi.impl.MyceliumWalletApiImpl;
-import com.mycelium.lt.api.LtApi;
-import com.mycelium.lt.api.LtApiClient;
-import com.mycelium.lt.api.LtApiClient.Logger;
+import com.mycelium.net.HttpEndpoint;
+import com.mycelium.net.HttpsEndpoint;
+import com.mycelium.net.ServerEndpoints;
+import com.mycelium.net.TorHttpsEndpoint;
+import com.mycelium.wallet.activity.util.BlockExplorer;
+import java.util.List;
+import java.util.ArrayList;
+
 
 public class MbwProdEnvironment extends MbwEnvironment {
    /**
@@ -50,59 +52,89 @@ public class MbwProdEnvironment extends MbwEnvironment {
     */
    private static final String myceliumThumbprint = "B3:42:65:33:40:F5:B9:1B:DA:A2:C8:7A:F5:4C:7C:5D:A9:63:C4:C3";
 
-   /**
-    * Two redundant Mycelium wallet service servers for prodnet
-    */
-   private static final MyceliumWalletApiImpl.HttpsEndpoint httpsProdnetEndpoint1 = new MyceliumWalletApiImpl.HttpsEndpoint(
-         "https://mws1.mycelium.com/mws", myceliumThumbprint);
-   private static final MyceliumWalletApiImpl.HttpsEndpoint httpsProdnetEndpoint2 = new MyceliumWalletApiImpl.HttpsEndpoint(
-         "https://mws2.mycelium.com/mws", myceliumThumbprint);
 
-   /**
-    * The set of endpoints we use for prodnet. The wallet chooses a random
-    * endpoint and if it does not respond it round-robins through the list. This
-    * way we achieve client side load-balancing and fail-over.
-    */
-   private static final MyceliumWalletApiImpl.HttpEndpoint[] prodnetServerEndpoints = new MyceliumWalletApiImpl.HttpEndpoint[] {
-         httpsProdnetEndpoint1, httpsProdnetEndpoint2 };
-   private static final MyceliumWalletApiImpl prodnetApi = new MyceliumWalletApiImpl(prodnetServerEndpoints,
-         NetworkParameters.productionNetwork);
+   public MbwProdEnvironment(String brand){
+      super(brand);
+   }
 
-   /**
-    * Local Trader API for prodnet
-    */
-   private static final LtApiClient.HttpsEndpoint prodnetLocalTraderDefaultEndpoint = new LtApiClient.HttpsEndpoint(
-         "https://lt2.mycelium.com/ltprodnet/", myceliumThumbprint);
-   private static final LtApiClient.HttpsEndpoint prodnetLocalTraderFailoverEndpoint = new LtApiClient.HttpsEndpoint(
-         "https://lt1.mycelium.com/ltprodnet/", myceliumThumbprint);
-   
-   private static final LtApiClient prodnetLocalTraderApi = new LtApiClient(prodnetLocalTraderDefaultEndpoint, prodnetLocalTraderFailoverEndpoint, new Logger() {
-
-      @Override
-      public void logError(String message, Exception e) {
-         Log.e("", message, e);
-
-      }
-
-      @Override
-      public void logError(String message) {
-         Log.e("", message);
-
-      }
-   });
-   
    @Override
    public NetworkParameters getNetwork() {
       return NetworkParameters.productionNetwork;
    }
 
-   @Override
-   public MyceliumWalletApi getMwsApi() {
-      return prodnetApi;
-   }
+
+   /**
+    * Local Trader API for prodnet
+    */
+   private static final ServerEndpoints prodnetLtEndpoints = new ServerEndpoints(new HttpEndpoint[]{
+         new HttpsEndpoint("https://lt2.mycelium.com/ltprodnet", myceliumThumbprint),
+         new HttpsEndpoint("https://lt1.mycelium.com/ltprodnet", myceliumThumbprint),
+
+         new HttpsEndpoint("https://188.40.73.130/ltprodnet", myceliumThumbprint), // lt2
+         new HttpsEndpoint("https://46.4.101.162/ltprodnet", myceliumThumbprint), // lt1
+
+         new TorHttpsEndpoint("https://7c7yicf4e3brohwi.onion/ltprodnet", myceliumThumbprint),
+         new TorHttpsEndpoint("https://wmywc6g3mknihpq2.onion/ltprodnet", myceliumThumbprint),
+         new TorHttpsEndpoint("https://lodffvexeb72vf2f.onion/ltprodnet", myceliumThumbprint),
+         new TorHttpsEndpoint("https://az5zxxebeule5hmn.onion/ltprodnet", myceliumThumbprint),
+   }, 0);
 
    @Override
-   public LtApi getLocalTraderApi() {
-      return prodnetLocalTraderApi;
+   public ServerEndpoints getLtEndpoints() {
+      return  prodnetLtEndpoints;
+   }
+
+
+   /**
+    * Wapi
+    */
+   private static final HttpEndpoint[] prodnetWapiEndpoints = new HttpEndpoint[] {
+         // mws 2,6,7
+         new HttpsEndpoint("https://mws2.mycelium.com/wapi", myceliumThumbprint),
+         new HttpsEndpoint("https://mws6.mycelium.com/wapi", myceliumThumbprint),
+         new HttpsEndpoint("https://mws7.mycelium.com/wapi", myceliumThumbprint),
+         new HttpsEndpoint("https://mws8.mycelium.com/wapi", myceliumThumbprint),
+
+         // Also try to connect to the nodes via a hardcoded IP, in case the DNS has some problems
+         new HttpsEndpoint("https://138.201.206.35/wapi", myceliumThumbprint),   // mws2
+         new HttpsEndpoint("https://46.4.101.162/wapi", myceliumThumbprint),  // mws6
+         new HttpsEndpoint("https://46.4.3.125/wapi", myceliumThumbprint),     // mws7
+         new HttpsEndpoint("https://188.40.73.130/wapi", myceliumThumbprint),     // mws8
+
+         new TorHttpsEndpoint("https://vtuao7psnrsot4tb.onion/wapi", myceliumThumbprint),     // tor hidden services
+         new TorHttpsEndpoint("https://n76y5k3le2zi73bw.onion/wapi", myceliumThumbprint),
+         new TorHttpsEndpoint("https://slacef5ylu6op7zc.onion/wapi", myceliumThumbprint),
+         new TorHttpsEndpoint("https://rztvro6qgydmujfv.onion/wapi", myceliumThumbprint),
+   };
+
+   private static final ServerEndpoints prodnetWapiServerEndpoints = new ServerEndpoints(prodnetWapiEndpoints);
+
+   @Override
+   public ServerEndpoints getWapiEndpoints() {
+      return prodnetWapiServerEndpoints;
+   }
+
+   /**
+    * Available BlockExplorers
+    *
+    * The first is the default block explorer if the requested one is not available
+    */
+   private static final ArrayList <BlockExplorer> prodnetExplorerClearEndpoints = new ArrayList<BlockExplorer>() {{
+      add(new BlockExplorer("BCI","blockchain.info","https://blockchain.info/address/","https://blockchain.info/tx/","https://blockchainbdgpzk.onion/address/","https://blockchainbdgpzk.onion/tx/"));
+      add(new BlockExplorer("BKR","blockr", "https://btc.blockr.io/address/info/", "https://btc.blockr.io/tx/info/", null, null));
+      add(new BlockExplorer("SBT","smartbit", "https://www.smartbit.com.au/address/", "https://www.smartbit.com.au/tx/", null, null));
+      add(new BlockExplorer("BTL","blockTrail", "https://www.blocktrail.com/BTC/address/", "https://www.blocktrail.com/BTC/tx/", null, null));
+      add(new BlockExplorer("BPY","BitPay", "https://insight.bitpay.com/address/", "https://insight.bitpay.com/tx/", null, null));
+      add(new BlockExplorer("BEX","blockExplorer", "http://blockexplorer.com/address/", "http://blockexplorer.com/tx/", null, null));
+      add(new BlockExplorer("BAC","bitAccess", "https://search.bitaccess.ca/address/", "https://search.bitaccess.ca/tx/", null, null));
+      add(new BlockExplorer("BCY","blockCypher", "https://live.blockcypher.com/btc/address/", "https://live.blockcypher.com/btc/tx/", null, null));
+      add(new BlockExplorer("BES","bitEasy", "https://www.biteasy.com/blockchain/addresses/", "https://www.biteasy.com/blockchain/transactions/", null, null));
+      add(new BlockExplorer("CPM","coinprism", "https://www.coinprism.info/address/", "https://www.coinprism.info/tx/", null, null));
+      add(new BlockExplorer("TBC","TradeBlock", "https://tradeblock.com/blockchain/address/", "https://tradeblock.com/blockchain/tx/", null, null));
+      add(new BlockExplorer("BLC","blockonomics.co", "https://www.blockonomics.co/#/search?q=", "https://www.blockonomics.co/api/tx?txid=", null, null));
+   }};
+
+   public List<BlockExplorer> getBlockExplorerList() {
+      return new ArrayList<BlockExplorer>(prodnetExplorerClearEndpoints);
    }
 }

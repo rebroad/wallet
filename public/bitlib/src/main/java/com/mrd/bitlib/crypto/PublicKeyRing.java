@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import java.util.Set;
 import com.mrd.bitlib.model.Address;
 import com.mrd.bitlib.model.NetworkParameters;
 
-public class PublicKeyRing {
+public class PublicKeyRing implements IPublicKeyRing {
    private List<Address> _addresses;
    private Set<Address> _addressSet;
    private Map<Address, PublicKey> _publicKeys;
@@ -57,6 +57,7 @@ public class PublicKeyRing {
       _publicKeys.put(address, key);
    }
 
+   @Override
    public PublicKey findPublicKeyByAddress(Address address) {
       return _publicKeys.get(address);
    }

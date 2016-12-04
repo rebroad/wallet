@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -35,13 +35,13 @@
 package com.mycelium.wallet.api;
 
 import android.os.Handler;
-import com.mrd.mbwapi.api.MyceliumWalletApi;
+import com.mycelium.wapi.api.Wapi;
 import com.squareup.otto.Bus;
 
 public class AndroidAsyncApi extends AsynchronousApi {
 
-   public AndroidAsyncApi(MyceliumWalletApi api, ApiCache cache, Bus bus) {
-      super(api, cache, bus);
+   public AndroidAsyncApi(Wapi api, Bus bus) {
+      super(api, bus);
    }
 
    public static class HandlerRunnerPoster implements CallbackRunnerInvoker {

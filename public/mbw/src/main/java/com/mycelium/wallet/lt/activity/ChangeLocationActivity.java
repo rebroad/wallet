@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -42,10 +42,10 @@ import android.view.View.OnClickListener;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
-
 import com.mycelium.lt.api.model.GpsLocation;
 import com.mycelium.lt.location.RemoteGeocodeException;
 import com.mycelium.wallet.GpsLocationFetcher;
+import com.mycelium.wallet.GpsLocationFetcher.GpsLocationEx;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
 import com.mycelium.wallet.lt.LocalTraderManager;
@@ -68,8 +68,7 @@ public class ChangeLocationActivity extends Activity {
    }
 
    private MbwManager _mbwManager;
-   private LocalTraderManager _ltManager;
-   private GpsLocation _chosenAddress;
+   private GpsLocationEx _chosenAddress;
    private Button _btUse;
    private TextView _tvLocation;
    private GpsLocationFetcher.Callback _gpsLocationCallback;
@@ -83,22 +82,22 @@ public class ChangeLocationActivity extends Activity {
       super.onCreate(savedInstanceState);
       setContentView(R.layout.lt_change_location_activity);
       _mbwManager = MbwManager.getInstance(this);
-      _ltManager = _mbwManager.getLocalTraderManager();
+      LocalTraderManager ltManager = _mbwManager.getLocalTraderManager();
 
       _btUse = (Button) findViewById(R.id.btUse);
       _tvLocation = (TextView) findViewById(R.id.tvLocation);
 
       // Load intent parameters
       _persist = getIntent().getBooleanExtra("persist", false);
-      _chosenAddress = (GpsLocation) getIntent().getSerializableExtra("location");
+      _chosenAddress = GpsLocationEx.fromGpsLocation((GpsLocation) getIntent().getSerializableExtra("location"));
 
       // Load saved state
       if (savedInstanceState != null) {
-         _chosenAddress = (GpsLocation) savedInstanceState.getSerializable("location");
+         _chosenAddress = (GpsLocationEx) savedInstanceState.getSerializable("location");
       }
 
       if (_chosenAddress == null) {
-         _chosenAddress = _ltManager.getUserLocation();
+         _chosenAddress = ltManager.getUserLocation();
       }
 
       _btUse.setOnClickListener(useClickListener);
@@ -109,7 +108,7 @@ public class ChangeLocationActivity extends Activity {
       _gpsLocationCallback = new GpsLocationFetcher.Callback(this) {
 
          @Override
-         protected void onGpsLocationObtained(GpsLocation location) {
+         protected void onGpsLocationObtained(GpsLocationEx location) {
             TextView tvError = (TextView) findViewById(R.id.tvError);
             tvError.setVisibility(View.VISIBLE);
 
@@ -175,11 +174,6 @@ public class ChangeLocationActivity extends Activity {
       super.onResume();
    }
 
-   @Override
-   protected void onPause() {
-      super.onPause();
-   }
-
    private void updateUi() {
       if (_chosenAddress != null) {
          _tvLocation.setText(_chosenAddress.name);
@@ -192,10 +186,9 @@ public class ChangeLocationActivity extends Activity {
 
    public void onActivityResult(final int requestCode, final int resultCode, final Intent intent) {
       if (requestCode == ENTER_LOCATION_REQUEST_CODE && resultCode == RESULT_OK) {
-         _chosenAddress = (GpsLocation) intent.getSerializableExtra("location");
-      } else {
-         // We didn't like what we got, bail
+         _chosenAddress = (GpsLocationEx) intent.getSerializableExtra("location");
       }
+      // else  We didn't like what we got, bail...
    }
 
 }

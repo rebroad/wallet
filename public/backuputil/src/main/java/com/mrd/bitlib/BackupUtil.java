@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013. 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,7 +61,7 @@ public class BackupUtil {
          MrdExport.V1.Header header = MrdExport.V1.extractHeader(encryptedPrivateKey);
          MrdExport.V1.KdfParameters kdfParameters = MrdExport.V1.KdfParameters.fromPassphraseAndHeader(realpassword, header);
          MrdExport.V1.EncryptionParameters parameters = MrdExport.V1.EncryptionParameters.generate(kdfParameters);
-         String privateKey = MrdExport.V1.decrypt(parameters, encryptedPrivateKey, header.network);
+         String privateKey = MrdExport.V1.decryptPrivateKey(parameters, encryptedPrivateKey, header.network);
          InMemoryPrivateKey key = new InMemoryPrivateKey(privateKey, header.network);
          return "Private key (Wallet Import Format): " +key.getBase58EncodedPrivateKey(header.network) +
                "\n" +

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,16 +27,25 @@ import com.mrd.bitlib.util.Sha256Hash;
 
 public class TransactionInput implements Serializable {
    private static final long serialVersionUID = 1L;
+   private static final long SEQUENCE_NO_RBF = 0xFFFFFFFEL; // MAX_INT-1 as unsigned int, anything below is RBF able
 
    public static class TransactionInputParsingException extends Exception {
       private static final long serialVersionUID = 1L;
 
       public TransactionInputParsingException(byte[] script) {
-         super("Unable to parse transaction input: " + HexUtils.toHex(script));
+         this(script, null);
+      }
+
+      public TransactionInputParsingException(byte[] script, Exception e) {
+         super("Unable to parse transaction input: " + HexUtils.toHex(script), e);
       }
 
       public TransactionInputParsingException(String message) {
-         super(message);
+         this(message, null);
+      }
+
+      public TransactionInputParsingException(String message, Exception e) {
+         super(message, e );
       }
    }
 
@@ -63,7 +72,7 @@ public class TransactionInput implements Serializable {
             try {
                inscript = ScriptInput.fromScriptBytes(script);
             } catch (ScriptParsingException e) {
-               throw new TransactionInputParsingException(e.getMessage());
+               throw new TransactionInputParsingException(e.getMessage(), e);
             }
          }
          return new TransactionInput(outPoint, inscript, sequence);
@@ -84,6 +93,10 @@ public class TransactionInput implements Serializable {
 
    public ScriptInput getScript() {
       return script;
+   }
+
+   public boolean isMarkedForRbf(){
+      return (this.sequence & 0xFFFFFFFFL) < SEQUENCE_NO_RBF;
    }
 
    public void toByteWriter(ByteWriter writer) {

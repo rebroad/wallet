@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -35,34 +35,50 @@
 package com.mycelium.wallet.activity.send;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
+import android.os.AsyncTask;
 import android.os.Bundle;
-import android.os.Handler;
+import android.support.v4.app.Fragment;
 import android.view.Window;
 import android.widget.Toast;
-
 import com.google.common.base.Preconditions;
-
 import com.mrd.bitlib.model.Transaction;
-import com.mrd.mbwapi.api.ApiError;
-import com.mrd.mbwapi.api.BroadcastTransactionResponse;
-import com.mycelium.wallet.Constants;
-import com.mycelium.wallet.MbwManager;
-import com.mycelium.wallet.R;
-import com.mycelium.wallet.api.AbstractCallbackHandler;
-import com.mycelium.wallet.api.AndroidAsyncApi;
-import com.mycelium.wallet.api.AsyncTask;
+import com.mrd.bitlib.util.Sha256Hash;
+import com.mycelium.wallet.*;
+import com.mycelium.wallet.event.SyncFailed;
+import com.mycelium.wallet.event.SyncStopped;
+import com.mycelium.wapi.model.TransactionEx;
+import com.mycelium.wapi.wallet.WalletAccount;
+import com.squareup.otto.Subscribe;
+
+import java.util.UUID;
 
 public class BroadcastTransactionActivity extends Activity {
+   protected MbwManager _mbwManager;
+   protected WalletAccount _account;
+   protected boolean _isColdStorage;
+   private String _transactionLabel;
+   private Transaction _transaction;
+   private AsyncTask<Void, Integer, WalletAccount.BroadcastResult> _broadcastingTask;
+   private WalletAccount.BroadcastResult _broadcastResult;
 
-   private MbwManager _mbwManager;
-   private AsyncTask _task;
-
-   public static void callMe(Activity currentActivity, Transaction transaction) {
+   public static void callMe(Activity currentActivity, UUID account, boolean isColdStorage, Transaction signed, String transactionLabel, int requestCode) {
       Intent intent = new Intent(currentActivity, BroadcastTransactionActivity.class);
-      intent.putExtra("transaction", transaction);
-      intent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT);
-      currentActivity.startActivity(intent);
+      intent.putExtra("account", account);
+      intent.putExtra("isColdStorage", isColdStorage);
+      intent.putExtra("signed", signed);
+      intent.putExtra("transactionLabel", transactionLabel);
+      intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
+      currentActivity.startActivityForResult(intent, requestCode);
+   }
+
+   public static boolean callMe(Activity currentActivity, WalletAccount account, Sha256Hash txid) {
+      TransactionEx tx = account.getTransaction(txid);
+      if (tx == null) return false;
+      callMe(currentActivity, account.getId(), false, TransactionEx.toTransaction(tx), null, 0);
+      return  true;
    }
 
    @Override
@@ -70,67 +86,149 @@ public class BroadcastTransactionActivity extends Activity {
       this.requestWindowFeature(Window.FEATURE_NO_TITLE);
       super.onCreate(savedInstanceState);
       setContentView(R.layout.broadcast_transaction_activity);
+
       _mbwManager = MbwManager.getInstance(getApplication());
-
       // Get intent parameters
-      Intent intent = Preconditions.checkNotNull(getIntent());
-      Transaction transaction = Preconditions.checkNotNull((Transaction) intent.getSerializableExtra("transaction"),
-            "unable to deserialize Transaction from Intent");
+      UUID accountId = Preconditions.checkNotNull((UUID) getIntent().getSerializableExtra("account"));
+      _isColdStorage = getIntent().getBooleanExtra("isColdStorage", false);
+      _account = Preconditions.checkNotNull(_mbwManager.getWalletManager(_isColdStorage).getAccount(accountId));
+      _transaction = (Transaction) Preconditions.checkNotNull(getIntent().getSerializableExtra("signed"));
 
-      // If the user rotates the screen or otherwise forces us to re-create the
-      // activity we will broadcast it twice. This is not a problem as
-      // broadcasting a transaction is idempotent.
-      broadcastTransaction(transaction);
+      //May be null
+      _transactionLabel = getIntent().getStringExtra("transactionLabel");
+
    }
 
    @Override
-   protected void onDestroy() {
-      cancelEverything();
-      super.onDestroy();
+   protected void onStart() {
+      super.onStart();
    }
 
    @Override
    protected void onResume() {
-      super.onResume();
-   }
+      _mbwManager.getEventBus().register(this);
 
-   private void cancelEverything() {
-      if (_task != null) {
-         _task.cancel();
-         _task = null;
+      if (_broadcastingTask == null) {
+         _broadcastingTask = startBroadcastingTask();
       }
+      super.onResume();
+      overridePendingTransition(0, 0);
    }
 
-   private void broadcastTransaction(Transaction transaction) {
-      AndroidAsyncApi api = _mbwManager.getAsyncApi();
-      _task = api.broadcastTransaction(transaction, new BroadcastTransactionHandler());
-   }
 
-   class BroadcastTransactionHandler implements AbstractCallbackHandler<BroadcastTransactionResponse> {
+   private AsyncTask<Void, Integer, WalletAccount.BroadcastResult> startBroadcastingTask() {
+      // Broadcast the transaction in the background
+      AsyncTask<Void, Integer, WalletAccount.BroadcastResult> task = new AsyncTask<Void, Integer, WalletAccount.BroadcastResult>() {
 
-      @Override
-      public void handleCallback(BroadcastTransactionResponse response, ApiError exception) {
-         _task = null;
-         Activity me = BroadcastTransactionActivity.this;
-         if (exception != null) {
-            Toast.makeText(me, getResources().getString(R.string.transaction_not_sent), Toast.LENGTH_LONG).show();
-         } else {
-            // Include the transaction hash in the response
-            Intent result = new Intent();
-            result.putExtra(Constants.TRANSACTION_HASH_INTENT_KEY, response.hash.toString());
-            setResult(RESULT_OK, result);
-            Toast.makeText(me, getResources().getString(R.string.transaction_sent), Toast.LENGTH_LONG).show();
+         @Override
+         protected WalletAccount.BroadcastResult doInBackground(Void... args) {
+            return _account.broadcastTransaction(_transaction);
          }
 
-         // Delay finish slightly
-         new Handler().postDelayed(new Runnable() {
+         @Override
+         protected void onPostExecute(WalletAccount.BroadcastResult result) {
+            _broadcastResult = result;
+            showResult();
+         }
+      };
 
+      task.execute();
+      return task;
+   }
+
+   private void showResult() {
+      if (_broadcastResult == WalletAccount.BroadcastResult.REJECTED) {
+         // Transaction rejected, display message and exit
+         Utils.showSimpleMessageDialog(this, R.string.transaction_rejected_message, new Runnable() {
             @Override
             public void run() {
                BroadcastTransactionActivity.this.finish();
             }
-         }, 200);
+         });
+      } else if (_broadcastResult == WalletAccount.BroadcastResult.NO_SERVER_CONNECTION) {
+         if (_isColdStorage) {
+            // When doing cold storage spending we do not offer to queue the transaction
+            Utils.showSimpleMessageDialog(this, R.string.transaction_not_sent, new Runnable() {
+               @Override
+               public void run() {
+                  BroadcastTransactionActivity.this.setResult(RESULT_CANCELED);
+                  BroadcastTransactionActivity.this.finish();
+               }
+            });
+         } else {
+            // Offer the user to queue the transaction
+            AlertDialog.Builder queueDialog = new AlertDialog.Builder(this);
+            queueDialog.setTitle(R.string.no_server_connection);
+            queueDialog.setMessage(R.string.queue_transaction_message);
+
+            queueDialog.setPositiveButton(R.string.yes, new DialogInterface.OnClickListener() {
+
+               public void onClick(DialogInterface arg0, int arg1) {
+                  _account.queueTransaction(TransactionEx.fromUnconfirmedTransaction(_transaction));
+                  setResultOkay();
+
+                  BroadcastTransactionActivity.this.finish();
+               }
+            });
+            queueDialog.setNegativeButton(R.string.no, new DialogInterface.OnClickListener() {
+
+               public void onClick(DialogInterface arg0, int arg1) {
+                  setResult(RESULT_CANCELED);
+                  BroadcastTransactionActivity.this.finish();
+               }
+            });
+            queueDialog.show();
+
+         }
+      } else if (_broadcastResult == WalletAccount.BroadcastResult.SUCCESS) {
+         // Toast success and finish
+         Toast.makeText(this, getResources().getString(R.string.transaction_sent),
+               Toast.LENGTH_LONG).show();
+
+         setResultOkay();
+         finish();
+      } else {
+         throw new RuntimeException();
       }
+   }
+
+   private void setResultOkay() {
+      //store the transaction label if there is one
+      if (_transactionLabel != null) {
+         _mbwManager.getMetadataStorage().storeTransactionLabel(_transaction.getHash(), _transactionLabel);
+      }
+
+      // Include the transaction hash in the response
+      Intent result = new Intent();
+      result.putExtra(Constants.TRANSACTION_HASH_INTENT_KEY, _transaction.getHash().toString());
+      setResult(RESULT_OK, result);
+   }
+
+   @Override
+   protected void onPause() {
+      _mbwManager.getEventBus().unregister(this);
+      super.onPause();
+   }
+
+   @Override
+   protected void onDestroy() {
+      if (_broadcastingTask != null){
+         _broadcastingTask.cancel(true);
+      }
+      super.onDestroy();
+   }
+
+   protected void clearTempWalletManager() {
+      _mbwManager.forgetColdStorageWalletManager();
+   }
+
+   @Subscribe
+   public void syncFailed(SyncFailed event) {
+      Utils.toastConnectionError(this);
+   }
+
+   @Subscribe
+   public void syncStopped(SyncStopped sync) {
    }
 
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -41,28 +41,29 @@ import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.Window;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.TextView;
-
+import com.google.common.base.Preconditions;
 import com.mrd.bitlib.model.Address;
 import com.mycelium.lt.api.model.TradeSession;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
-import com.mycelium.wallet.Record;
+import com.mycelium.wallet.Utils;
 import com.mycelium.wallet.lt.activity.SendRequestActivity;
 import com.mycelium.wallet.lt.api.SetTradeReceivingAddress;
+import com.mycelium.wapi.wallet.WalletAccount;
 
 public class SetTradeAddress extends Activity {
 
    public static void callMe(Activity currentActivity, TradeSession tradeSession) {
       Intent intent = new Intent(currentActivity, SetTradeAddress.class);
+      Preconditions.checkNotNull(tradeSession);
+      Preconditions.checkNotNull(tradeSession.id);
       intent.putExtra("tradeSession", tradeSession);
       intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
       currentActivity.startActivity(intent);
    }
 
    private TradeSession _tradeSession;
-   private MbwManager _mbwManager;
    private Address _address;
 
    /**
@@ -75,15 +76,17 @@ public class SetTradeAddress extends Activity {
       super.onCreate(savedInstanceState);
       setContentView(R.layout.lt_set_trade_address_activity);
 
-      _mbwManager = MbwManager.getInstance(getApplication());
+      MbwManager _mbwManager = MbwManager.getInstance(getApplication());
 
       // Get intent parameters
       _tradeSession = (TradeSession) getIntent().getSerializableExtra("tradeSession");
-
-      _address = _mbwManager.getRecordManager().getWallet(_mbwManager.getWalletMode()).getReceivingAddress();
+      Preconditions.checkNotNull(_tradeSession);
+      Preconditions.checkNotNull(_tradeSession.id);
+      WalletAccount account = _mbwManager.getSelectedAccount();
+      _address = account.getReceivingAddress().get();
       // Set label if applicable
       TextView addressLabel = (TextView) findViewById(R.id.tvAddressLabel);
-      String label = _mbwManager.getAddressBookManager().getNameByAddress(_address.toString());
+      String label = _mbwManager.getMetadataStorage().getLabelByAccount(account.getId());
       if (label == null || label.length() == 0) {
          // Hide label
          addressLabel.setVisibility(View.GONE);
@@ -97,20 +100,24 @@ public class SetTradeAddress extends Activity {
       ((TextView) findViewById(R.id.tvAddress)).setText(_address.toMultiLineString());
 
       // Show / hide warning
-      Record record = _mbwManager.getRecordManager().getRecord(_address);
       TextView tvWarning = (TextView) findViewById(R.id.tvWarning);
-      if (record != null && record.hasPrivateKey()) {
+      if (account.canSpend() && Utils.isAllowedForLocalTrader(account)) {
          // We send to an address where we have the private key
          findViewById(R.id.tvWarning).setVisibility(View.GONE);
       } else {
          // Show a warning as we are sending to an address where we don't have
-         // the private key
+         // the private key or which is not allowed at all
          tvWarning.setVisibility(View.VISIBLE);
-         tvWarning.setText(R.string.read_only_warning);
          tvWarning.setTextColor(getResources().getColor(R.color.red));
+         if (Utils.isAllowedForLocalTrader(account)) {
+            tvWarning.setText(R.string.read_only_warning);
+         } else {
+            findViewById(R.id.btOk).setEnabled(false);
+            tvWarning.setText(R.string.lt_account_not_allowed);
+         }
       }
 
-      ((Button) findViewById(R.id.btOk)).setOnClickListener(startTradingClickListener);
+      findViewById(R.id.btOk).setOnClickListener(startTradingClickListener);
    }
 
    OnClickListener startTradingClickListener = new OnClickListener() {
@@ -125,20 +132,9 @@ public class SetTradeAddress extends Activity {
 
    @Override
    protected void onResume() {
-      if(!hasMoreThanOneReceivingAddress()){
-         SetTradeReceivingAddress request = new SetTradeReceivingAddress(_tradeSession.id, _address);
-         SendRequestActivity.callMe(SetTradeAddress.this, request, "");
-         finish();
-      }
+      Preconditions.checkNotNull(_tradeSession);
+      Preconditions.checkNotNull(_tradeSession.id);
       super.onResume();
    }
 
-   @Override
-   protected void onPause() {
-      super.onPause();
-   }
-
-   private boolean hasMoreThanOneReceivingAddress() {
-      return _mbwManager.getRecordManager().numRecords() > 1;
-   }
 }

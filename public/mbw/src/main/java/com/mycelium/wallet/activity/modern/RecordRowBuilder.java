@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,34 +34,46 @@
 
 package com.mycelium.wallet.activity.modern;
 
-import java.util.Set;
-
 import android.content.res.Resources;
+import android.graphics.drawable.Drawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
-
+import com.google.common.base.Optional;
 import com.mrd.bitlib.model.Address;
-import com.mycelium.wallet.AddressBookManager;
-import com.mycelium.wallet.BalanceInfo;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
-import com.mycelium.wallet.Record;
-import com.mycelium.wallet.Record.Tag;
 import com.mycelium.wallet.Utils;
-import com.mycelium.wallet.Wallet;
+import com.mycelium.wallet.activity.util.ToggleableCurrencyButton;
+import com.mycelium.wallet.persistence.MetadataStorage;
+import com.mycelium.wapi.model.Balance;
+import com.mycelium.wapi.wallet.WalletAccount;
+import com.mycelium.wapi.wallet.bip44.Bip44Account;
+import com.mycelium.wapi.wallet.bip44.Bip44PubOnlyAccount;
+import com.mycelium.wapi.wallet.currency.CurrencyBasedBalance;
+import com.mycelium.wapi.wallet.currency.CurrencySum;
+import com.mycelium.wapi.wallet.single.SingleAddressAccount;
 
 public class RecordRowBuilder {
 
-   public static View buildRecordView(Resources resources, MbwManager mbwManager, LayoutInflater inflater,
-         AddressBookManager addressBook, ViewGroup parent, Record record, boolean isSelected, boolean hasFocus,
-         Set<Address> selectedAddresses) {
+   private final MbwManager mbwManager;
+   private final Resources resources;
+   private final LayoutInflater inflater;
+
+   public RecordRowBuilder(MbwManager mbwManager, Resources resources, LayoutInflater inflater) {
+      this.mbwManager = mbwManager;
+      this.resources = resources;
+      this.inflater = inflater;
+   }
+
+   public View buildRecordView(ViewGroup parent, WalletAccount walletAccount, boolean isSelected, boolean hasFocus) {
       View rowView = inflater.inflate(R.layout.record_row, parent, false);
 
       // Make grey if not part of the balance
-
-      if (!selectedAddresses.contains(record.address)) {
+      if (!isSelected) {
          Utils.setAlpha(rowView, 0.5f);
       }
 
@@ -73,15 +85,19 @@ public class RecordRowBuilder {
       }
 
       // Show/hide key icon
-      if (!record.hasPrivateKey()) {
-         rowView.findViewById(R.id.ivKey).setVisibility(View.INVISIBLE);
+      ImageView icon = (ImageView) rowView.findViewById(R.id.ivIcon);
+
+      Drawable drawableForAccount = Utils.getDrawableForAccount(walletAccount, isSelected, resources);
+      if (drawableForAccount == null) {
+         icon.setVisibility(View.INVISIBLE);
+      } else {
+         icon.setVisibility(View.VISIBLE);
+         icon.setImageDrawable(drawableForAccount);
       }
 
-      // Set Label
-      String address = record.address.toString();
-      String name = addressBook.getNameByAddress(address);
+      String name = mbwManager.getMetadataStorage().getLabelByAccount(walletAccount.getId());
       if (name.length() == 0) {
-         ((TextView) rowView.findViewById(R.id.tvLabel)).setVisibility(View.GONE);
+         rowView.findViewById(R.id.tvLabel).setVisibility(View.GONE);
       } else {
          // Display name
          TextView tvLabel = ((TextView) rowView.findViewById(R.id.tvLabel));
@@ -91,70 +107,122 @@ public class RecordRowBuilder {
       }
 
       String displayAddress;
-      if (name.length() == 0) {
-         // Display address in it's full glory, chopping it into three
-         displayAddress = record.address.toMultiLineString();
+      if (walletAccount.isActive()) {
+         if (walletAccount instanceof Bip44PubOnlyAccount) {
+            int numKeys = ((Bip44Account) walletAccount).getPrivateKeyCount();
+            if (numKeys > 1) {
+               displayAddress = resources.getString(R.string.contains_addresses, Integer.toString(numKeys));
+            } else {
+               displayAddress = resources.getString(R.string.account_contains_one_address_info);
+            }
+         } else if (walletAccount instanceof Bip44Account) {
+            int numKeys = ((Bip44Account) walletAccount).getPrivateKeyCount();
+            if (numKeys > 1) {
+               displayAddress = resources.getString(R.string.contains_keys, Integer.toString(numKeys));
+            } else {
+               displayAddress = resources.getString(R.string.account_contains_one_key_info);
+            }
+         } else {
+
+            Optional<Address> receivingAddress = walletAccount.getReceivingAddress();
+            if (receivingAddress.isPresent()) {
+               if (name.length() == 0) {
+                  // Display address in it's full glory, chopping it into three
+                  displayAddress = receivingAddress.get().toMultiLineString();
+               } else {
+                  // Display address in short form
+                  displayAddress = receivingAddress.get().getShortAddress();
+               }
+            } else {
+               displayAddress = "";
+            }
+         }
       } else {
-         // Display address in short form
-         displayAddress = getShortAddress(address);
+         displayAddress = ""; //dont show key count of archived accs
       }
+
+
       TextView tvAddress = ((TextView) rowView.findViewById(R.id.tvAddress));
       tvAddress.setText(displayAddress);
       tvAddress.setTextColor(textColor);
 
       // Set tag
-      rowView.setTag(record);
-
-      // Show selected address with a different color
-      if (isSelected) {
-         // rowView.setBackgroundColor(resources.getColor(R.color.black));
-         // rowView.setBackgroundDrawable(resources.getDrawable(R.drawable.btn_blue_slim));
-      } else {
-         // rowView.setBackgroundDrawable(resources.getDrawable(R.drawable.btn_pitch_black_slim));
-      }
+      rowView.setTag(walletAccount);
 
       // Set balance
-      if (record.tag == Tag.ACTIVE) {
-         BalanceInfo balance = new Wallet(record).getLocalBalance(mbwManager.getBlockChainAddressTracker());
-         if (balance.isKnown()) {
-            rowView.findViewById(R.id.tvBalance).setVisibility(View.VISIBLE);
-            String balanceString = mbwManager.getBtcValueString(balance.unspent + balance.pendingChange);
-            TextView tvBalance = ((TextView) rowView.findViewById(R.id.tvBalance));
-            tvBalance.setText(balanceString);
-            tvBalance.setTextColor(textColor);
-         } else {
-            // We don't show anything if we don't know the balance
-            rowView.findViewById(R.id.tvBalance).setVisibility(View.GONE);
-         }
+      if (walletAccount.isActive()) {
+         CurrencyBasedBalance balance = walletAccount.getCurrencyBasedBalance();
+         rowView.findViewById(R.id.tvBalance).setVisibility(View.VISIBLE);
+         String balanceString = Utils.getFormattedValueWithUnit(balance.confirmed, mbwManager.getBitcoinDenomination());
+         TextView tvBalance = ((TextView) rowView.findViewById(R.id.tvBalance));
+         tvBalance.setText(balanceString);
+         tvBalance.setTextColor(textColor);
+
+         // Show legacy account with funds warning if necessary
+         boolean showLegacyAccountWarning = showLegacyAccountWarning(walletAccount, mbwManager);
+         rowView.findViewById(R.id.tvLegacyAccountWarning).setVisibility(showLegacyAccountWarning ? View.VISIBLE : View.GONE);
+
+         // Show legacy account with funds warning if necessary
+         boolean showBackupMissingWarning = showBackupMissingWarning(walletAccount, mbwManager);
+         rowView.findViewById(R.id.tvBackupMissingWarning).setVisibility(showBackupMissingWarning ? View.VISIBLE : View.GONE);
+
       } else {
-         // We don't show anything if we don't know the address is archived
+         // We don't show anything if the account is archived
          rowView.findViewById(R.id.tvBalance).setVisibility(View.GONE);
+         rowView.findViewById(R.id.tvLegacyAccountWarning).setVisibility(View.GONE);
+         rowView.findViewById(R.id.tvBackupMissingWarning).setVisibility(View.GONE);
       }
 
-      // Show or hide backup verification warning
-      if (record.needsBackupVerification()) {
-         rowView.findViewById(R.id.tvNoBackupWarning).setVisibility(View.VISIBLE);
-      } else {
-         rowView.findViewById(R.id.tvNoBackupWarning).setVisibility(View.GONE);
-      }
 
-      // Show/hide key icon
-      if (record.address.equals(mbwManager.getLocalTraderManager().getLocalTraderAddress())) {
+      // Show/hide trader account message
+      if (walletAccount.getId().equals(mbwManager.getLocalTraderManager().getLocalTraderAccountId())) {
          rowView.findViewById(R.id.tvTraderKey).setVisibility(View.VISIBLE);
       } else {
          rowView.findViewById(R.id.tvTraderKey).setVisibility(View.GONE);
       }
 
       return rowView;
-
    }
 
-   private static String getShortAddress(String addressString) {
-      StringBuilder sb = new StringBuilder();
-      sb.append(addressString.substring(0, 6));
-      sb.append("...");
-      sb.append(addressString.substring(addressString.length() - 6));
-      return sb.toString();
+   public View buildTotalView(LinearLayout parent, CurrencySum balanceSum) {
+      View rowView = inflater.inflate(R.layout.record_row_total, parent, false);
+      ToggleableCurrencyButton tcdBalance = ((ToggleableCurrencyButton) rowView.findViewById(R.id.tcdBalance));
+      tcdBalance.setEventBus(mbwManager.getEventBus());
+      tcdBalance.setCurrencySwitcher(mbwManager.getCurrencySwitcher());
+      tcdBalance.setValue(balanceSum);
+      return rowView;
    }
+
+   public static boolean showLegacyAccountWarning(WalletAccount account, MbwManager mbwManager) {
+      if (account.isArchived()) {
+         return false;
+      }
+      Balance balance = account.getBalance();
+      boolean showLegacyAccountWarning = (account instanceof SingleAddressAccount) &&
+            balance.getReceivingBalance() + balance.getSpendableBalance() > 0 &&
+            account.canSpend() &&
+            !mbwManager.getMetadataStorage().getIgnoreLegacyWarning(account.getId());
+      return showLegacyAccountWarning;
+   }
+
+   public static boolean showBackupMissingWarning(WalletAccount account, MbwManager mbwManager) {
+      if (account.isArchived()) {
+         return false;
+      }
+
+      boolean showBackupMissingWarning = false;
+      if (account.canSpend()) {
+         if (account.isDerivedFromInternalMasterseed()) {
+            showBackupMissingWarning = mbwManager.getMetadataStorage().getMasterSeedBackupState() != MetadataStorage.BackupState.VERIFIED;
+         } else {
+            MetadataStorage.BackupState backupState = mbwManager.getMetadataStorage().getOtherAccountBackupState(account.getId());
+            showBackupMissingWarning = (backupState != MetadataStorage.BackupState.VERIFIED) && (backupState != MetadataStorage.BackupState.IGNORED);
+         }
+      }
+
+      return showBackupMissingWarning;
+   }
+
+
 
 }

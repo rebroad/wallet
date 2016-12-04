@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,14 +34,6 @@
 
 package com.mycelium.wallet.activity.export;
 
-import static android.text.format.DateFormat.getDateFormat;
-
-import java.io.File;
-import java.text.DateFormat;
-import java.util.Date;
-import java.util.List;
-import java.util.Locale;
-
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
@@ -62,21 +54,27 @@ import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.WindowManager;
 import android.widget.TextView;
-
 import com.google.common.base.Preconditions;
 import com.mrd.bitlib.crypto.MrdExport;
 import com.mrd.bitlib.crypto.MrdExport.V1.KdfParameters;
-import com.mycelium.wallet.AndroidRandomSource;
-import com.mycelium.wallet.MbwManager;
-import com.mycelium.wallet.R;
-import com.mycelium.wallet.UserFacingException;
-import com.mycelium.wallet.Utils;
+import com.mycelium.wallet.*;
 import com.mycelium.wallet.service.CreateMrdBackupTask;
 import com.mycelium.wallet.service.ServiceTask;
 import com.mycelium.wallet.service.ServiceTaskStatusEx;
 import com.mycelium.wallet.service.ServiceTaskStatusEx.State;
 import com.mycelium.wallet.service.TaskExecutionServiceController;
 import com.mycelium.wallet.service.TaskExecutionServiceController.TaskExecutionServiceCallback;
+import com.mycelium.wapi.wallet.AesKeyCipher;
+
+//todo HD: export master seed without address/xpub extra data.
+//todo HD: later: be compatible with a common format
+import java.io.File;
+import java.text.DateFormat;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+
+import static android.text.format.DateFormat.getDateFormat;
 
 public class BackupToPdfActivity extends Activity implements TaskExecutionServiceCallback {
 
@@ -101,7 +99,9 @@ public class BackupToPdfActivity extends Activity implements TaskExecutionServic
    private boolean _isPdfGenerated;
    private boolean _oomDetected;
 
-   /** Called when the activity is first created. */
+   /**
+    * Called when the activity is first created.
+    */
    @Override
    public void onCreate(Bundle savedInstanceState) {
       this.getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
@@ -242,19 +242,6 @@ public class BackupToPdfActivity extends Activity implements TaskExecutionServic
       super.onPause();
    }
 
-   @Override
-   public void onBackPressed() {
-      // Delete export file. It may not be created when the user exits, so we
-      // don't check for that
-
-      // XXX don't delete backup anyway... we may do it before the sharing has
-      // completed.
-      // XXX instead we should delete backup files when we start the backup
-      // process
-      // deleteBackupFile();
-      super.onBackPressed();
-   }
-
    @SuppressWarnings("unused")
    private void deleteBackupFile() {
       boolean success;
@@ -308,10 +295,11 @@ public class BackupToPdfActivity extends Activity implements TaskExecutionServic
 
    private void startTask() {
       findViewById(R.id.btSharePdf).setEnabled(false);
-      KdfParameters kdfParameters = KdfParameters.createNewFromPassphrase(_password, new AndroidRandomSource());
+      KdfParameters kdfParameters = KdfParameters.createNewFromPassphrase(_password, new AndroidRandomSource(),
+            _mbwManager.getDeviceScryptParameters());
       CreateMrdBackupTask task = new CreateMrdBackupTask(kdfParameters, this.getApplicationContext(),
-            _mbwManager.getRecordManager(), _mbwManager.getAddressBookManager(), _mbwManager.getNetwork(),
-            getFullExportFilePath());
+            _mbwManager.getWalletManager(false), AesKeyCipher.defaultKeyCipher(), _mbwManager.getMetadataStorage(),
+            _mbwManager.getNetwork(), getFullExportFilePath());
       _taskExecutionServiceController.bind(this, this);
       _taskExecutionServiceController.start(task);
    }

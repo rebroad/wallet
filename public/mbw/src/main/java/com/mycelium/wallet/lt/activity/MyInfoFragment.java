@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -56,7 +56,6 @@ import com.mycelium.wallet.lt.api.Request;
 public class MyInfoFragment extends Fragment {
 
    protected static final int CREATE_TRADER_RESULT_CODE = 0;
-   private MbwManager _mbwManager;
    private LocalTraderManager _ltManager;
 
    @Override
@@ -81,14 +80,9 @@ public class MyInfoFragment extends Fragment {
 
    @Override
    public void onAttach(Activity activity) {
-      _mbwManager = MbwManager.getInstance(getActivity().getApplication());
+      MbwManager _mbwManager = MbwManager.getInstance(getActivity().getApplication());
       _ltManager = _mbwManager.getLocalTraderManager();
       super.onAttach(activity);
-   }
-
-   @Override
-   public void onDetach() {
-      super.onDetach();
    }
 
    @Override
@@ -102,11 +96,6 @@ public class MyInfoFragment extends Fragment {
    public void onPause() {
       _ltManager.unsubscribe(ltSubscriber);
       super.onPause();
-   }
-
-   @Override
-   public void onDestroy() {
-      super.onDestroy();
    }
 
    private void updateUi() {
@@ -129,7 +118,7 @@ public class MyInfoFragment extends Fragment {
          viTraderInfo.setVisibility(View.VISIBLE);
          FragmentTransaction ft = getFragmentManager().beginTransaction();
          ft.replace(R.id.flTraderInfo, TraderInfoFragment.createInstance(info));
-         ft.commit();
+         ft.commitAllowingStateLoss();
       }
    }
 

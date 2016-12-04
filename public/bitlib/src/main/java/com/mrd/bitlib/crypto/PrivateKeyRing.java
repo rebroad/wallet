@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import java.util.Map;
 import com.mrd.bitlib.model.Address;
 import com.mrd.bitlib.model.NetworkParameters;
 
-public class PrivateKeyRing extends PublicKeyRing {
+public class PrivateKeyRing extends PublicKeyRing implements IPrivateKeyRing {
 
    private Map<PublicKey, PrivateKey> _privateKeys;
 
@@ -39,7 +39,8 @@ public class PrivateKeyRing extends PublicKeyRing {
    }
 
    /**
-    * Add a private and public key pair along with the corresponding address to the key ring.
+    * Add a private and public key pair along with the corresponding address to
+    * the key ring.
     */
    public void addPrivateKey(PrivateKey privateKey, PublicKey publicKey, Address address) {
       _privateKeys.put(publicKey, privateKey);
@@ -49,6 +50,7 @@ public class PrivateKeyRing extends PublicKeyRing {
    /**
     * Find a Bitcoin signer by public key
     */
+   @Override
    public BitcoinSigner findSignerByPublicKey(PublicKey publicKey) {
       return _privateKeys.get(publicKey);
    }

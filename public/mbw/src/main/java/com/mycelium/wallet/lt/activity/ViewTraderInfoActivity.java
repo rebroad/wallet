@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -66,8 +66,8 @@ public class ViewTraderInfoActivity extends FragmentActivity {
    protected void onResume() {
       FragmentTransaction ft = getSupportFragmentManager().beginTransaction();
       ft.replace(R.id.flTraderInfo, TraderInfoFragment.createInstance(_traderInfo));
-      ft.commit();
+      ft.commitAllowingStateLoss();
       super.onResume();
-   };
+   }
 
 }

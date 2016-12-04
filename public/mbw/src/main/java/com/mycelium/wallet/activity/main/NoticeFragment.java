@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,12 +34,10 @@
 
 package com.mycelium.wallet.activity.main;
 
-import java.util.List;
-
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
-import android.content.Intent;
-import android.net.Uri;
+import android.content.DialogInterface;
 import android.os.Build;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
@@ -47,30 +45,31 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
-import android.widget.Toast;
-
+import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
-import com.google.common.eventbus.Subscribe;
-import com.mycelium.wallet.Constants;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
-import com.mycelium.wallet.Record;
-import com.mycelium.wallet.Record.BackupState;
-import com.mycelium.wallet.RecordManager;
 import com.mycelium.wallet.Utils;
 import com.mycelium.wallet.activity.export.VerifyBackupActivity;
-import com.mycelium.wallet.event.AddressBookChanged;
-import com.mycelium.wallet.event.RecordSetChanged;
-import com.mycelium.wallet.event.SelectedRecordChanged;
+import com.mycelium.wallet.activity.modern.RecordRowBuilder;
+import com.mycelium.wallet.event.AccountChanged;
+import com.mycelium.wallet.event.BalanceChanged;
+import com.mycelium.wallet.persistence.MetadataStorage;
+import com.mycelium.wapi.model.Balance;
+import com.mycelium.wapi.wallet.WalletAccount;
+import com.mycelium.wapi.wallet.bip44.Bip44Account;
+import com.mycelium.wapi.wallet.single.SingleAddressAccount;
+import com.squareup.otto.Subscribe;
+
+import java.util.List;
 
 public class NoticeFragment extends Fragment {
 
    private enum Notice {
-      VERIFICATION_MISSING, NONE
+      BACKUP_MISSING, SINGLEKEY_BACKUP_MISSING, MOVE_LEGACY_FUNDS, RESET_PIN_AVAILABLE, RESET_PIN_IN_PROGRESS, NONE
    }
 
    private MbwManager _mbwManager;
-   private RecordManager _recordManager;
    private View _root;
    private Notice _notice;
 
@@ -83,20 +82,13 @@ public class NoticeFragment extends Fragment {
    @Override
    public void onCreate(Bundle savedInstanceState) {
       setHasOptionsMenu(false);
-      setRetainInstance(true);
       super.onCreate(savedInstanceState);
    }
 
    @Override
    public void onAttach(Activity activity) {
       _mbwManager = MbwManager.getInstance(activity);
-      _recordManager = _mbwManager.getRecordManager();
       super.onAttach(activity);
-   }
-
-   @Override
-   public void onDetach() {
-      super.onDetach();
    }
 
    @Override
@@ -105,6 +97,7 @@ public class NoticeFragment extends Fragment {
       _notice = determineNotice();
       _root.findViewById(R.id.btWarning).setOnClickListener(warningClickListener);
       _root.findViewById(R.id.btBackupMissing).setOnClickListener(noticeClickListener);
+      _root.findViewById(R.id.btPinResetNotice).setOnClickListener(noticeClickListener);
       updateUi();
       super.onResume();
    }
@@ -115,22 +108,122 @@ public class NoticeFragment extends Fragment {
       super.onPause();
    }
 
+   private Notice determineNotice() {
+      List<WalletAccount> accounts = _mbwManager.getWalletManager(false).getActiveAccounts();
+      MetadataStorage meta = _mbwManager.getMetadataStorage();
+
+      Optional<Integer> resetPinRemainingBlocksCount = _mbwManager.getResetPinRemainingBlocksCount();
+      // Check first if a Pin-Reset is now possible
+      if (resetPinRemainingBlocksCount.isPresent() && resetPinRemainingBlocksCount.get()==0){
+         return Notice.RESET_PIN_AVAILABLE;
+      }
+
+      // Then check if a Pin-Reset is in process
+      if (resetPinRemainingBlocksCount.isPresent()){
+         return Notice.RESET_PIN_IN_PROGRESS;
+      }
+
+      // First check if we have HD accounts with funds, but have no master seed backup
+      if (meta.getMasterSeedBackupState() != MetadataStorage.BackupState.VERIFIED) {
+         for (WalletAccount account : accounts) {
+            if (account instanceof Bip44Account) {
+               Bip44Account ba = (Bip44Account) account;
+               Balance balance = ba.getBalance();
+               if (balance.getReceivingBalance() + balance.getSpendableBalance() > 0) {
+                  // We have an HD account with funds, and no master seed backup, tell the user to act
+                  return Notice.BACKUP_MISSING;
+               }
+            }
+         }
+      }
+
+      // Then check if there are some SingleAddressAccounts with funds on it
+      for (WalletAccount account : accounts){
+         if (account instanceof SingleAddressAccount && account.canSpend()){
+            if (meta.getOtherAccountBackupState(account.getId()) != MetadataStorage.BackupState.VERIFIED){
+               Balance balance = account.getBalance();
+               if (balance.getReceivingBalance() + balance.getSpendableBalance() > 0){
+                  return Notice.SINGLEKEY_BACKUP_MISSING;
+               }
+            }
+         }
+      }
+
+      // Second check whether to warn about legacy accounts with funds
+      for (WalletAccount account : accounts) {
+         if (RecordRowBuilder.showLegacyAccountWarning(account, _mbwManager)) {
+            return Notice.MOVE_LEGACY_FUNDS;
+         }
+      }
+
+      return Notice.NONE;
+   }
+
    private OnClickListener noticeClickListener = new OnClickListener() {
 
       @Override
       public void onClick(View v) {
          switch (_notice) {
-         case VERIFICATION_MISSING:
-            showVerificationWarning();
-            break;
-         case NONE:
-            openMyceliumHelp();
-            break;
-         default:
-            break;
+            case RESET_PIN_AVAILABLE:
+            case RESET_PIN_IN_PROGRESS:
+               showPinResetWarning();
+               break;
+            case BACKUP_MISSING:
+               showBackupWarning();
+               break;
+            case SINGLEKEY_BACKUP_MISSING:
+               showSingleKeyBackupWarning();
+               break;
+            case MOVE_LEGACY_FUNDS:
+               showMoveLegacyFundsWarning();
+               break;
+            default:
+               break;
          }
       }
+
    };
+
+   private void showPinResetWarning() {
+      Optional<Integer> resetPinRemainingBlocksCount = _mbwManager.getResetPinRemainingBlocksCount();
+
+      if (!resetPinRemainingBlocksCount.isPresent()){
+         recheckNotice();
+         return;
+      }
+
+      if (resetPinRemainingBlocksCount.get()==0){
+         // delay is done
+         _mbwManager.showClearPinDialog(this.getActivity(), Optional.<Runnable>of(new Runnable() {
+            @Override
+            public void run() {
+               recheckNotice();
+            }
+         }));
+         return;
+      }
+
+      // delay is still remaining, provide option to abort
+      String remaining = Utils.formatBlockcountAsApproxDuration(this.getActivity(), resetPinRemainingBlocksCount.or(1));
+      new AlertDialog.Builder(this.getActivity())
+            .setMessage(String.format(this.getActivity().getString(R.string.pin_forgotten_abort_pin_reset), remaining))
+            .setTitle(this.getActivity().getString(R.string.pin_forgotten_reset_pin_dialog_title))
+            .setPositiveButton(this.getActivity().getString(R.string.yes), new DialogInterface.OnClickListener() {
+               @Override
+               public void onClick(DialogInterface dialog, int which) {
+                  _mbwManager.getMetadataStorage().clearResetPinStartBlockheight();
+                  recheckNotice();
+               }
+            })
+            .setNegativeButton(this.getActivity().getString(R.string.no), new DialogInterface.OnClickListener() {
+               @Override
+               public void onClick(DialogInterface dialog, int which) {
+                  // nothing to do here
+               }
+            })
+            .show();
+   }
+
    private OnClickListener warningClickListener = new OnClickListener() {
 
       @Override
@@ -142,40 +235,34 @@ public class NoticeFragment extends Fragment {
       }
    };
 
-   private void showVerificationWarning() {
+   private void showBackupWarning() {
       if (!isAdded()) {
          return;
       }
-      VerifyBackupDialog dialog = new VerifyBackupDialog(getActivity());
-      dialog.show();
+      Utils.pinProtectedWordlistBackup(getActivity());
+   }
+
+   private void showSingleKeyBackupWarning() {
+      if (!isAdded()) {
+         return;
+      }
+      Utils.pinProtectedBackup(getActivity());
+   }
+
+   private void showMoveLegacyFundsWarning() {
+      if (!isAdded()) {
+         return;
+      }
+      Utils.showSimpleMessageDialog(getActivity(), R.string.move_legacy_funds_message);
    }
 
    private boolean shouldWarnAboutHeartbleedBug() {
-      System.out.println(Build.VERSION.RELEASE);
       // The Heartbleed bug is only present in Android version 4.1.1
       return Build.VERSION.RELEASE.equals("4.1.1");
    }
 
-   private void openMyceliumHelp() {
-      Intent intent = new Intent(Intent.ACTION_VIEW);
-      intent.setData(Uri.parse(Constants.MYCELIUM_WALLET_HELP_URL));
-      startActivity(intent);
-      Toast.makeText(getActivity(), R.string.going_to_mycelium_com_help, Toast.LENGTH_LONG).show();
-   }
 
-   private Notice determineNotice() {
-      List<Record> records = _recordManager.getAllRecords();
-
-      // Check for missing backup verifications
-      for (Record record : records) {
-         if (record.hasPrivateKey() && record.backupState != BackupState.VERIFIED) {
-            return Notice.VERIFICATION_MISSING;
-         }
-      }
-
-      return Notice.NONE;
-   }
-
+   //this got replaced by VerifyWordlistBackup, but stays here unused, in case we ever need again the old backup functionality
    private class VerifyBackupDialog extends Dialog {
 
       public VerifyBackupDialog(final Activity activity) {
@@ -202,7 +289,6 @@ public class NoticeFragment extends Fragment {
             }
 
          });
-
       }
    }
 
@@ -210,45 +296,35 @@ public class NoticeFragment extends Fragment {
       if (!isAdded()) {
          return;
       }
-      switch (_notice) {
-      case VERIFICATION_MISSING:
-         _root.findViewById(R.id.btBackupMissing).setVisibility(View.VISIBLE);
-         break;
-      default:
-         _root.findViewById(R.id.btBackupMissing).setVisibility(View.GONE);
-         break;
+
+      // Show button, that a PIN reset is in progress and allow to abort it
+      _root.findViewById(R.id.btPinResetNotice).setVisibility(_notice == Notice.RESET_PIN_AVAILABLE || _notice == Notice.RESET_PIN_IN_PROGRESS ? View.VISIBLE : View.GONE);
+
+      // Only show the "Secure My Funds" button when necessary
+      _root.findViewById(R.id.btBackupMissing).setVisibility(_notice == Notice.BACKUP_MISSING || _notice == Notice.SINGLEKEY_BACKUP_MISSING ? View.VISIBLE : View.GONE);
+
+      // Only show the heartbleed warning when necessary
+      _root.findViewById(R.id.btWarning).setVisibility(shouldWarnAboutHeartbleedBug() ? View.VISIBLE : View.GONE);
+
+   }
+
+   private void recheckNotice() {
+      Notice notice = determineNotice();
+      if (_notice != notice) {
+         _notice = notice;
+         updateUi();
       }
-
-      if (shouldWarnAboutHeartbleedBug()) {
-         _root.findViewById(R.id.btWarning).setVisibility(View.VISIBLE);
-      } else {
-         _root.findViewById(R.id.btWarning).setVisibility(View.GONE);
-      }
-
-   }
-
-   /**
-    * Fires when record set changed
-    */
-   @Subscribe
-   public void recordSetChanged(RecordSetChanged event) {
-      _notice = determineNotice();
-      updateUi();
-   }
-
-   /**
-    * Fires when the selected record changes
-    */
-   @Subscribe
-   public void selectedRecordChanged(SelectedRecordChanged event) {
-      _notice = determineNotice();
-      updateUi();
    }
 
    @Subscribe
-   public void addressBookChanged(AddressBookChanged event) {
-      _notice = determineNotice();
-      updateUi();
+   public void accountChanged(AccountChanged event) {
+      recheckNotice();
    }
+
+   @Subscribe
+   public void balanceChanged(BalanceChanged event) {
+      recheckNotice();
+   }
+
 
 }

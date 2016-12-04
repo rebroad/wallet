@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -40,25 +40,25 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.widget.TextView;
-
+import com.mrd.bitlib.crypto.InMemoryPrivateKey;
+import com.mrd.bitlib.model.Address;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
-import com.mycelium.wallet.Record;
-import com.mycelium.wallet.RecordManager;
+import com.mycelium.wallet.activity.util.AddressLabel;
+import com.mycelium.wapi.wallet.WalletManager;
 
 public class CreateKeyActivity extends Activity {
 
-   private MbwManager _manager;
-   private RecordManager _recordManager;
-   private Record _key;
+   private MbwManager manager;
+   private WalletManager walletManager;
+   private InMemoryPrivateKey key;
 
    /** Called when the activity is first created. */
    @Override
    public void onCreate(Bundle savedInstanceState) {
       super.onCreate(savedInstanceState);
-      _manager = MbwManager.getInstance(getApplication());
-      _recordManager = _manager.getRecordManager();
+      manager = MbwManager.getInstance(getApplication());
+      walletManager = manager.getWalletManager(false);
       setContentView(R.layout.create_key_activity);
 
       findViewById(R.id.btShuffle).setOnClickListener(new OnClickListener() {
@@ -75,7 +75,7 @@ public class CreateKeyActivity extends Activity {
          @Override
          public void onClick(View arg0) {
             Intent result = new Intent();
-            result.putExtra("base58key", _key.key.getBase58EncodedPrivateKey(_manager.getNetwork()));
+            result.putExtra("base58key", key.getBase58EncodedPrivateKey(manager.getNetwork()));
             CreateKeyActivity.this.setResult(RESULT_OK, result);
             CreateKeyActivity.this.finish();
          }
@@ -89,17 +89,17 @@ public class CreateKeyActivity extends Activity {
       findViewById(R.id.btUse).setEnabled(false);
       findViewById(R.id.btShuffle).setEnabled(false);
 
-      new AsyncTask<Void, Void, Record>() {
+      new AsyncTask<Void, Void, InMemoryPrivateKey>() {
          @Override
-         protected Record doInBackground(Void... voids) {
-            return Record.createRandom(_recordManager.getRandomSource(), _manager.getNetwork());
+         protected InMemoryPrivateKey doInBackground(Void... voids) {
+            return new InMemoryPrivateKey(manager.getRandomSource(), true);
          }
 
          @Override
-         protected void onPostExecute(Record record) {
-            _key = record;
-            String address = _key.address.toMultiLineString();
-            ((TextView) findViewById(R.id.tvAddress)).setText(address);
+         protected void onPostExecute(InMemoryPrivateKey pk) {
+            key = pk;
+            Address address = key.getPublicKey().toAddress(manager.getNetwork());
+            ((AddressLabel) findViewById(R.id.tvAddress)).setAddress(address);
             findViewById(R.id.btShuffle).setEnabled(true);
             findViewById(R.id.btUse).setEnabled(true);
          }

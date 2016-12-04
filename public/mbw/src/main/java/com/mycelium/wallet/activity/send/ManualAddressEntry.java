@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -84,7 +84,7 @@ public class ManualAddressEntry extends Activity {
    @Override
    public void onSaveInstanceState(Bundle savedInstanceState) {
       super.onSaveInstanceState(savedInstanceState);
-      savedInstanceState.putSerializable("entered", ((EditText) findViewById(R.id.etAddress)).toString());
+      savedInstanceState.putSerializable("entered", findViewById(R.id.etAddress).toString());
    }
 
    OnClickListener okClickListener = new OnClickListener() {

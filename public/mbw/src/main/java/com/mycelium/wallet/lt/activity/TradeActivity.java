@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,17 +34,6 @@
 
 package com.mycelium.wallet.lt.activity;
 
-import java.net.MalformedURLException;
-import java.net.URISyntaxException;
-import java.net.URL;
-import java.text.DateFormat;
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.List;
-import java.util.Locale;
-import java.util.UUID;
-
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
@@ -55,27 +44,16 @@ import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
-import android.view.KeyEvent;
-import android.view.LayoutInflater;
-import android.view.View;
+import android.view.*;
 import android.view.View.OnClickListener;
-import android.view.ViewGroup;
-import android.view.Window;
-import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
-import android.widget.AdapterView;
+import android.widget.*;
 import android.widget.AdapterView.OnItemClickListener;
-import android.widget.ArrayAdapter;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.ImageButton;
-import android.widget.ListView;
-import android.widget.ProgressBar;
-import android.widget.TextView;
+import android.widget.AdapterView.OnItemLongClickListener;
 import android.widget.TextView.OnEditorActionListener;
-import android.widget.Toast;
-
+import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
+import com.mrd.bitlib.StandardTransactionBuilder;
 import com.mrd.bitlib.crypto.PublicKey;
 import com.mrd.bitlib.model.Transaction;
 import com.mrd.bitlib.util.HexUtils;
@@ -88,21 +66,25 @@ import com.mycelium.lt.api.params.TradeChangeParameters;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
 import com.mycelium.wallet.Utils;
+import com.mycelium.wallet.activity.send.SignTransactionActivity;
 import com.mycelium.wallet.lt.LocalTraderEventSubscriber;
 import com.mycelium.wallet.lt.LocalTraderManager;
 import com.mycelium.wallet.lt.TradeSessionChangeMonitor;
 import com.mycelium.wallet.lt.activity.buy.SetTradeAddress;
-import com.mycelium.wallet.lt.api.AbortTrade;
-import com.mycelium.wallet.lt.api.AcceptTrade;
-import com.mycelium.wallet.lt.api.ChangeTradeSessionPrice;
-import com.mycelium.wallet.lt.api.ReleaseBtc;
-import com.mycelium.wallet.lt.api.RequestMarketRateRefresh;
-import com.mycelium.wallet.lt.api.SendEncryptedChatMessage;
+import com.mycelium.wallet.lt.api.*;
+import com.mycelium.wapi.wallet.WalletAccount;
+import com.mycelium.wapi.wallet.WalletManager;
+
+import java.net.MalformedURLException;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.text.DateFormat;
+import java.util.*;
 
 public class TradeActivity extends Activity {
-
    protected static final int CHANGE_PRICE_REQUEST_CODE = 1;
    protected static final int REFRESH_PRICE_REQUEST_CODE = 2;
+   private static final int SIGN_TX_REQUEST_CODE = 3;
 
    public static void callMe(Activity currentActivity, TradeSession tradeSession) {
       if (tradeSession.isOpen && tradeSession.isBuyer && tradeSession.buyerAddress == null) {
@@ -120,8 +102,6 @@ public class TradeActivity extends Activity {
    private MbwManager _mbwManager;
    private LocalTraderManager _ltManager;
    private TradeSession _tradeSession;
-   // private MyTradeSessionUpdateListener _tradeSessionListener;
-   private MyListener _myListener;
    private Button _btRefresh;
    private Button _btChangePrice;
    private Button _btAccept;
@@ -144,7 +124,6 @@ public class TradeActivity extends Activity {
    @Override
    public void onCreate(Bundle savedInstanceState) {
       this.requestWindowFeature(Window.FEATURE_NO_TITLE);
-      this.getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
       super.onCreate(savedInstanceState);
       setContentView(R.layout.lt_trade_activity);
       _mbwManager = MbwManager.getInstance(this.getApplication());
@@ -159,7 +138,7 @@ public class TradeActivity extends Activity {
       _btAbort = (Button) findViewById(R.id.btAbort);
       _tvStatus = (TextView) findViewById(R.id.tvStatus);
       _tvOldStatus = (TextView) findViewById(R.id.tvOldStatus);
-      _flConfidence = (View) findViewById(R.id.flConfidence);
+      _flConfidence = findViewById(R.id.flConfidence);
       _pbConfidence = (ProgressBar) findViewById(R.id.pbConfidence);
       _tvConfidence = (TextView) findViewById(R.id.tvConfidence);
 
@@ -168,7 +147,7 @@ public class TradeActivity extends Activity {
       _etMessage.setOnEditorActionListener(editActionListener);
       _btSendMessage.setOnClickListener(sendMessageClickListener);
       _btAccept.setOnClickListener(acceptClickListener);
-      _btAbort.setOnClickListener(abortorStopClickListener);
+      _btAbort.setOnClickListener(abortOrStopOrDeleteClickListener);
       _btCashReceived.setOnClickListener(cashReceivedClickListener);
       _updateSound = RingtoneManager
             .getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
@@ -186,16 +165,34 @@ public class TradeActivity extends Activity {
 
       _lvChat = (ListView) findViewById(R.id.lvChat);
       _lvChat.setAdapter(_chatAdapter);
+      //to follow urls
       _lvChat.setOnItemClickListener(chatItemClickListener);
+      //to copy to clipboard
+      _lvChat.setOnItemLongClickListener(chatLongClickListener);
+
+      Utils.showOptionalMessage(this, R.string.lt_cash_only_warning);
+
    }
 
    @Override
    protected void onResume() {
       _ltManager.enableNotifications(false);
       _ltManager.subscribe(ltSubscriber);
-      _myListener = new MyListener(_tradeSession.id, _tradeSession.lastChange);
-      _ltManager.startMonitoringTradeSession(_myListener);
-      updateUi();
+      MyListener myListener = new MyListener(_tradeSession.id, _tradeSession.lastChange);
+      _ltManager.startMonitoringTradeSession(myListener);
+      if (Utils.isAllowedForLocalTrader(_mbwManager.getSelectedAccount())) {
+         //everything is fine, update UI
+         updateUi();
+      } else {
+         //sneaked an invalid acc into lt, we show a message and close the trade activity
+         Runnable close = new Runnable() {
+            @Override
+            public void run() {
+               TradeActivity.this.finish();
+            }
+         };
+         Utils.showSimpleMessageDialog(this, R.string.lt_warning_wrong_account_type, close);
+      }
       super.onResume();
    }
 
@@ -244,11 +241,55 @@ public class TradeActivity extends Activity {
 
       @Override
       public void onClick(View arg0) {
-         disableButtons();
-         _dingOnUpdates = false;
-         _ltManager.makeRequest(new AcceptTrade(_tradeSession.id, _tradeSession.lastChange));
+         // if we are a buyer, verify that the address is still in our wallet and spendable
+         if (_tradeSession.isBuyer) {
+            final WalletManager walletManager = _mbwManager.getWalletManager(false);
+            final Optional<UUID> accountByAddress = walletManager.getAccountByAddress(_tradeSession.buyerAddress);
+            if (!accountByAddress.isPresent()
+                  || !walletManager.hasAccount(accountByAddress.get())
+                  || !walletManager.getAccount(accountByAddress.get()).canSpend()) {
+
+               new AlertDialog.Builder(TradeActivity.this)
+                     .setMessage(String.format(getString(R.string.lt_warn_account_not_spandable), _tradeSession.buyerAddress))
+                     .setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                           doAcceptTrade();
+                        }
+                     })
+                     .setNegativeButton(R.string.lt_change_payout_address, new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                           // if the current selected account is also not spendable, try to select the first
+                           // spendable one - there should always at least one HD account be available
+                           if (!_mbwManager.getSelectedAccount().canSpend()) {
+                              final List<WalletAccount> spendingAccounts = walletManager.getSpendingAccounts();
+                              if (spendingAccounts.size() > 0) {
+                                 _mbwManager.setSelectedAccount(spendingAccounts.get(0).getId());
+                              }
+                           }
+                           // call the SetTradeAddress activity - it will call us again after finishing
+                           SetTradeAddress.callMe(TradeActivity.this, _tradeSession);
+                           TradeActivity.this.finish();
+                        }
+                     })
+                     .show();
+
+            } else {
+               doAcceptTrade();
+            }
+         } else {
+            doAcceptTrade();
+         }
       }
    };
+
+   private void doAcceptTrade() {
+      disableButtons();
+      _dingOnUpdates = false;
+      _ltManager.makeRequest(new AcceptTrade(_tradeSession.id, _tradeSession.lastChange));
+   }
+
 
    OnClickListener cashReceivedClickListener = new OnClickListener() {
 
@@ -285,26 +326,59 @@ public class TradeActivity extends Activity {
 
          @Override
          public void run() {
-            Transaction tx = TradeActivityUtil.createSignedTransaction(_tradeSession, _mbwManager);
-            if (tx == null) {
-               Toast.makeText(TradeActivity.this, R.string.lt_cannot_affort_trade, Toast.LENGTH_LONG).show();
-               return;
-            }
-            disableButtons();
-            _dingOnUpdates = false;
-            _ltManager.makeRequest(new ReleaseBtc(_tradeSession.id, HexUtils.toHex(tx.toBytes())));
+            createSignedTransaction(_tradeSession, _mbwManager);
          }
 
       });
    }
 
-   OnClickListener abortorStopClickListener = new OnClickListener() {
+   private void createSignedTransaction(TradeSession ts, MbwManager mbwManager) {
+      Preconditions.checkNotNull(ts.buyerAddress);
+      WalletAccount acc = mbwManager.getSelectedAccount();
+
+      // Create unsigned transaction
+      StandardTransactionBuilder.UnsignedTransaction unsigned = TradeActivityUtil.createUnsignedTransaction(ts.satoshisFromSeller, ts.satoshisForBuyer,
+            ts.buyerAddress, ts.feeAddress, acc, _ltManager.getMinerFeeEstimation().getLongValue());
+
+      SignTransactionActivity.callMe(this, mbwManager.getSelectedAccount().getId(), false, unsigned, SIGN_TX_REQUEST_CODE);
+   }
+
+
+   OnClickListener abortOrStopOrDeleteClickListener = new OnClickListener() {
 
       @Override
       public void onClick(View arg0) {
-         confirmAbort();
+         if (_tradeSession.abortAction.isApplicable()) {
+            //abort trade
+            confirmAbort();
+         } else {
+            //delete history
+            confirmDelete();
+         }
       }
    };
+
+   private void confirmDelete() {
+      AlertDialog.Builder confirmDialog = new AlertDialog.Builder(this);
+      confirmDialog.setTitle(R.string.lt_confirm_title);
+      confirmDialog.setMessage(getString(R.string.lt_confirm_delete_history));
+      confirmDialog.setPositiveButton(R.string.yes, new DialogInterface.OnClickListener() {
+
+         public void onClick(DialogInterface arg0, int arg1) {
+            // User clicked yes
+            _ltManager.makeRequest(new DeleteTradeHistory(_tradeSession.id));
+            finish();
+         }
+      });
+      confirmDialog.setNegativeButton(R.string.no, new DialogInterface.OnClickListener() {
+
+         public void onClick(DialogInterface arg0, int arg1) {
+            // User clicked no
+         }
+      });
+      confirmDialog.show();
+
+   }
 
    private void confirmAbort() {
       String message;
@@ -383,7 +457,6 @@ public class TradeActivity extends Activity {
                   startActivity(intent);
                   String toast = getString(R.string.lt_going_to_website, uri.getHost());
                   Toast.makeText(TradeActivity.this, toast, Toast.LENGTH_LONG).show();
-                  return;
                }
             }
          }
@@ -419,6 +492,24 @@ public class TradeActivity extends Activity {
             // pass through
          }
          return null;
+      }
+   };
+
+   OnItemLongClickListener chatLongClickListener = new OnItemLongClickListener() {
+      @Override
+      public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
+         if (view != null) {
+            TextView tvMessage = (TextView) view.findViewById(R.id.tvMessage);
+            if (tvMessage != null) {
+               String text = tvMessage.getText().toString();
+               //set the message to clipboard
+               Utils.setClipboardString(text, TradeActivity.this);
+               String toast = getString(R.string.lt_copied_to_clipboard);
+               Toast.makeText(TradeActivity.this, toast, Toast.LENGTH_LONG).show();
+               return true;
+            }
+         }
+         return false;
       }
    };
 
@@ -473,20 +564,29 @@ public class TradeActivity extends Activity {
          if (percent > 99) {
             percent = 99;
          }
-         _tvConfidence.setText(getResources().getString(R.string.lt_transaction_confidence, percent));
+         _tvConfidence.setText(getResources().getString(R.string.lt_transaction_confidence, Integer.toString(percent)));
       } else {
          _flConfidence.setVisibility(View.GONE);
       }
 
-      // Stop or Abort
-      if (_tradeSession.isWaitingForPeerAccept || _tradeSession.acceptAction.isEnabled()) {
+      //Delete or Stop or Abort
+      if (!_tradeSession.isOpen) {
+         //trade is through, so delete history is possible
+         _btAbort.setText(R.string.lt_delete_trade_history);
+      } else if (_tradeSession.isWaitingForPeerAccept || _tradeSession.acceptAction.isEnabled()) {
+         //no one acceptec, so stop is possible
          _btAbort.setText(R.string.lt_stop_trade_button);
       } else {
+         //was accepted, so only abort with penalty is possible
          _btAbort.setText(R.string.lt_abort_trade_button);
       }
 
       // Chat
       _chatAdapter.clear();
+      // add a scary warning to the top of the chat
+      ChatEntry scaryWarning = new ChatEntry(0L, ChatEntry.TYPE_EVENT, ChatEntry.EVENT_SUBTYPE_CASH_ONLY_WARNING, "");
+      _chatAdapter.add(scaryWarning);
+      // add all the persisted messages
       for (ChatEntry chatEntry : tradeSession.chatEntries) {
          _chatAdapter.add(chatEntry);
       }
@@ -514,12 +614,18 @@ public class TradeActivity extends Activity {
       }
 
       applyActionStateToButton(tradeSession.acceptAction, canWeAffordThis, _btAccept);
-      applyActionStateToButton(tradeSession.abortAction, _btAbort);
       applyActionStateToButton(tradeSession.refreshRateAction, _btRefresh);
       applyActionStateToButton(tradeSession.changePriceAction, _btChangePrice);
       applyActionStateToButton(tradeSession.releaseBtcAction, canWeAffordThis, _btCashReceived);
       applyActionStateToButton(tradeSession.sendMessageAction, _btSendMessage);
       applyActionStateToButton(tradeSession.sendMessageAction, _etMessage);
+      applyActionStateToButton(tradeSession.abortAction, _btAbort);
+
+      //if the trade is through, show the button to enable delete history
+      if (!_tradeSession.isOpen) {
+         _btAbort.setVisibility(View.VISIBLE);
+         _btAbort.setEnabled(true);
+      }
    }
 
    private void displayInsufficientFunds() {
@@ -582,7 +688,7 @@ public class TradeActivity extends Activity {
          _ownerMessageBackgroundColor = 0x22FFFFFF; // half transparent white
          // (grey)
          _peerMessageBackgroundColor = 0x11FFFFFF; // slightly transparent white
-                                                   // (dark grey)
+         // (dark grey)
          _eventBackgroundColor = 0x00FFFFFF; // transparent white (black)
          _invalidMessageBackgroundColor = 0xFFFF0000; // red
       }
@@ -597,16 +703,7 @@ public class TradeActivity extends Activity {
          }
          ChatEntry o = getItem(position);
 
-         // Date, format depending on whether it is the same day or earlier
-         Date date = new Date(o.time);
-         String dateString;
-         if (date.before(_midnight)) {
-            dateString = _dayFormat.format(date) + "\n" + _hourFormat.format(date);
-         } else {
-            dateString = _hourFormat.format(date);
-         }
-         TextView tvDate = (TextView) v.findViewById(R.id.tvDate);
-         tvDate.setText(dateString);
+         addDateString(v, o);
 
          // Message text and color
          TextView tvMessage = (TextView) v.findViewById(R.id.tvMessage);
@@ -614,39 +711,83 @@ public class TradeActivity extends Activity {
          int color;
          // Message Color
          switch (o.type) {
-         case ChatEntry.TYPE_EVENT:
-            text = o.message;
-            color = _eventBackgroundColor;
-            break;
-         case ChatEntry.TYPE_OWNER_CHAT:
-            try {
-               text = new StringBuilder().append(_tradeSession.ownerName).append(": ")
-                     .append(getChatMessageEncryptionKey().decryptAndCheckChatMessage(o.message)).toString();
-               color = _ownerMessageBackgroundColor;
-            } catch (InvalidChatMessage e) {
-               text = getString(R.string.lt_invalid_chat_message, _tradeSession.ownerName);
-               color = _invalidMessageBackgroundColor;
-            }
-            break;
-         case ChatEntry.TYPE_PEER_CHAT:
-            try {
-               text = new StringBuilder().append(_tradeSession.peerName).append(": ")
-                     .append(getChatMessageEncryptionKey().decryptAndCheckChatMessage(o.message)).toString();
-               color = _peerMessageBackgroundColor;
-            } catch (InvalidChatMessage e) {
-               text = getString(R.string.lt_invalid_chat_message, _tradeSession.peerName);
-               color = _invalidMessageBackgroundColor;
-            }
-            break;
-         default:
-            text = "";
-            color = _eventBackgroundColor;
+            case ChatEntry.TYPE_EVENT:
+               text = o.message;
+               color = _eventBackgroundColor;
+               break;
+            case ChatEntry.TYPE_OWNER_CHAT:
+               try {
+                  text = new StringBuilder().append(_tradeSession.ownerName).append(": ")
+                        .append(getChatMessageEncryptionKey().decryptAndCheckChatMessage(o.message)).toString();
+                  color = _ownerMessageBackgroundColor;
+               } catch (InvalidChatMessage e) {
+                  text = getString(R.string.lt_invalid_chat_message, _tradeSession.ownerName);
+                  color = _invalidMessageBackgroundColor;
+               }
+               break;
+            case ChatEntry.TYPE_PEER_CHAT:
+               try {
+                  text = new StringBuilder().append(_tradeSession.peerName).append(": ")
+                        .append(getChatMessageEncryptionKey().decryptAndCheckChatMessage(o.message)).toString();
+                  color = _peerMessageBackgroundColor;
+               } catch (InvalidChatMessage e) {
+                  text = getString(R.string.lt_invalid_chat_message, _tradeSession.peerName);
+                  color = _invalidMessageBackgroundColor;
+               }
+               break;
+            default:
+               text = "";
+               color = _eventBackgroundColor;
          }
          tvMessage.setText(text);
          v.setBackgroundColor(color);
 
+         ImageView ivExtra = (ImageView) v.findViewById(R.id.ivExtra);
+         if (o.subtype == ChatEntry.EVENT_SUBTYPE_CASH_ONLY_WARNING) {
+            ivExtra.setImageResource(R.drawable.lt_local_only_warning);
+            ivExtra.setVisibility(View.VISIBLE);
+            ivExtra.setOnClickListener(new OnClickListener() {
+               @Override
+               public void onClick(View v) {
+                  AlertDialog.Builder builder = new AlertDialog.Builder(TradeActivity.this);
+                  builder.setMessage(getString(R.string.lt_cash_only_warning));
+                  builder.setPositiveButton(R.string.button_ok, null);
+                  builder.show();
+               }
+            });
+         } else {
+            ivExtra.setVisibility(View.GONE);
+            ivExtra.setOnClickListener(null);
+         }
+
          v.setTag(o);
          return v;
+      }
+
+      /**
+       * Date, format depending on whether it is the same day or earlier
+       * If the date is 0, the date is hidden.
+       *
+       * @param chatEntryRow the R.layout.lt_chat_entry_row
+       * @param chatEntry    the ChatEntry
+       */
+      private void addDateString(View chatEntryRow, ChatEntry chatEntry) {
+         TextView tvDate = (TextView) chatEntryRow.findViewById(R.id.tvDate);
+         long unixTime = chatEntry.time;
+         if (unixTime > 0) {
+            // we have a date
+            Date date = new Date(chatEntry.time);
+            String dateString;
+            if (date.before(_midnight)) {
+               dateString = _dayFormat.format(date) + "\n" + _hourFormat.format(date);
+            } else {
+               dateString = _hourFormat.format(date);
+            }
+            tvDate.setText(dateString);
+            tvDate.setVisibility(View.VISIBLE);
+         } else {
+            tvDate.setVisibility(View.GONE);
+         }
       }
    }
 
@@ -660,7 +801,6 @@ public class TradeActivity extends Activity {
    }
 
    class MyListener extends TradeSessionChangeMonitor.Listener {
-
       protected MyListener(UUID tradeSessionId, long lastChange) {
          super(tradeSessionId, lastChange);
       }
@@ -673,17 +813,15 @@ public class TradeActivity extends Activity {
          // Tell other listeners that we have taken care of audibly notifying up
          // till this timestamp
          _ltManager.setLastNotificationSoundTimestamp(tradeSession.lastChange);
-         if (tradeSession.confidence != null && tradeSession.confidence > 0) {
-            // While displaying confidence we do not play a notification sound
-         } else {
+         if (tradeSession.confidence == null || tradeSession.confidence <= 0) {
             if (_dingOnUpdates && _updateSound != null && _ltManager.getPlaySoundOnTradeNotification()) {
                _updateSound.play();
             }
             _dingOnUpdates = true;
          }
+         // else: While displaying confidence we do not play a notification sound
          updateUi();
       }
-
    }
 
    public void onActivityResult(final int requestCode, final int resultCode, final Intent intent) {
@@ -701,11 +839,22 @@ public class TradeActivity extends Activity {
             _dingOnUpdates = false;
             _ltManager.makeRequest(new RequestMarketRateRefresh(_tradeSession.id));
          }
+      } else if (requestCode == SIGN_TX_REQUEST_CODE) {
+         if (resultCode == RESULT_OK) {
+            Transaction tx = (Transaction) intent.getSerializableExtra("signedTx");
+            if (tx == null) {
+               Toast.makeText(TradeActivity.this, R.string.lt_cannot_affort_trade, Toast.LENGTH_LONG).show();
+               return;
+            }
+            disableButtons();
+            _dingOnUpdates = false;
+            // send signed tx to server - it will check it and handle the broadcast
+            _ltManager.makeRequest(new ReleaseBtc(_tradeSession.id, HexUtils.toHex(tx.toBytes())));
+         }
       }
    }
 
    private LocalTraderEventSubscriber ltSubscriber = new LocalTraderEventSubscriber(new Handler()) {
-
       @Override
       public void onLtError(int errorCode) {
          Toast.makeText(TradeActivity.this, R.string.lt_error_api_occurred, Toast.LENGTH_LONG).show();
@@ -721,11 +870,7 @@ public class TradeActivity extends Activity {
 
       @Override
       public void onLtBtcReleased(Boolean success, ReleaseBtc request) {
-         // Synchronize wallet with backend. If we do not do this we risk
-         // sending out a double spend if we make two trades after another
-         _mbwManager.getSyncManager().triggerUpdate();
-      };
-
+         _mbwManager.getWalletManager(false).startSynchronization();
+      }
    };
-
 }

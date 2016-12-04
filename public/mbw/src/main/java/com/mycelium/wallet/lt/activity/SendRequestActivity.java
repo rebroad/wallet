@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -62,12 +62,10 @@ public class SendRequestActivity extends Activity {
 
    private static final int CREATE_TRADER_RESULT_CODE = 1;
    private static final int SOLVE_CAPTCHA_RESULT_CODE = 2;
-   private MbwManager _mbwManager;
    private LocalTraderManager _ltManager;
    private Request _request;
    private boolean _requestSent;
    private boolean _isCaptchaSolved;
-   private Handler _delayedProgressHandler;
 
    public static void callMe(Activity currentActivity, Request request, String title) {
       Intent intent = new Intent(currentActivity, SendRequestActivity.class);
@@ -82,7 +80,7 @@ public class SendRequestActivity extends Activity {
       this.requestWindowFeature(Window.FEATURE_NO_TITLE);
       super.onCreate(savedInstanceState);
       setContentView(R.layout.lt_send_request_activity);
-      _mbwManager = MbwManager.getInstance(this.getApplication());
+      MbwManager _mbwManager = MbwManager.getInstance(this.getApplication());
       _ltManager = _mbwManager.getLocalTraderManager();
 
       _request = (Request) getIntent().getSerializableExtra("request");
@@ -93,8 +91,7 @@ public class SendRequestActivity extends Activity {
          _isCaptchaSolved = savedInstanceState.getBoolean("isCaptchaSolved");
       }
       findViewById(R.id.pbWait).setVisibility(View.INVISIBLE);
-      _delayedProgressHandler = new Handler();
-      _delayedProgressHandler.postDelayed(new Runnable() {
+      new Handler().postDelayed(new Runnable() {
 
          @Override
          public void run() {
@@ -142,12 +139,12 @@ public class SendRequestActivity extends Activity {
 
    public void onActivityResult(final int requestCode, final int resultCode, final Intent intent) {
       if (requestCode == CREATE_TRADER_RESULT_CODE) {
-         if (resultCode == RESULT_OK) {
-            // great, we will try and create the trade on resume
-         } else {
+         if (resultCode != RESULT_OK) {
             // Creation failed, bail out
             finish();
          }
+         // else: great, we will try and create the trade on resume
+         
       } else if (requestCode == SOLVE_CAPTCHA_RESULT_CODE) {
          if (resultCode == RESULT_OK) {
             // great, we will try and create the trade on resume
@@ -179,26 +176,26 @@ public class SendRequestActivity extends Activity {
          Utils.toastConnectionError(SendRequestActivity.this);
          finish();
          return true;
-      };
+      }
 
       @Override
       public void onLtTradeCreated(UUID id, CreateTrade request) {
          SendRequestActivity.callMe(SendRequestActivity.this, new GetTradeSession(id), "");
          finish();
-      };
+      }
 
       @Override
       public void onLtTradeSessionFetched(com.mycelium.lt.api.model.TradeSession tradeSession,
             com.mycelium.wallet.lt.api.GetTradeSession request) {
          TradeActivity.callMe(SendRequestActivity.this, tradeSession);
          finish();
-      };
+      }
 
       @Override
       public void onLtTradeReceivingAddressSet(com.mycelium.wallet.lt.api.SetTradeReceivingAddress request) {
          SendRequestActivity.callMe(SendRequestActivity.this, new GetTradeSession(request.tradeSessionId), "");
          finish();
-      };
+      }
 
       @Override
       public void onLtAdCreated(UUID sellOrderId, CreateAd request) {
@@ -210,20 +207,20 @@ public class SendRequestActivity extends Activity {
       public void onLtAdEdited(EditAd request) {
          Toast.makeText(SendRequestActivity.this, R.string.lt_ad_edited, Toast.LENGTH_LONG).show();
          finish();
-      };
+      }
 
       @Override
       public void onLtAdRetrieved(com.mycelium.lt.api.model.Ad ad, com.mycelium.wallet.lt.api.GetAd request) {
          CreateOrEditAdActivity.callMe(SendRequestActivity.this, ad);
          finish();
-      };
+      }
 
       @Override
       public void onLtPublicTraderInfoFetched(com.mycelium.lt.api.model.PublicTraderInfo info,
             com.mycelium.wallet.lt.api.GetPublicTraderInfo request) {
          ViewTraderInfoActivity.callMe(SendRequestActivity.this, info);
          finish();
-      };
+      }
 
    };
 

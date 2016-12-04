@@ -3,5 +3,5 @@
     tools:ignore="MissingTranslation">
     <string name="network">prodnet</string>
     <bool name="email_on_errors">true</bool>
-
+    <string name="brand">bog</string>
 </resources>

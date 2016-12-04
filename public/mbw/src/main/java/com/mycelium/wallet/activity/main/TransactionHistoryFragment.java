@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,69 +34,62 @@
 
 package com.mycelium.wallet.activity.main;
 
-import java.text.DateFormat;
-import java.util.Calendar;
-import java.util.Collections;
-import java.util.Date;
-import java.util.Locale;
-import java.util.Set;
-
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
 import android.support.v7.app.ActionBarActivity;
 import android.support.v7.view.ActionMode;
-import android.view.LayoutInflater;
-import android.view.Menu;
-import android.view.MenuItem;
-import android.view.View;
-import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
+import android.view.*;
 import android.widget.ListView;
-import android.widget.TextView;
-
-import com.google.common.base.Joiner;
+import android.widget.Toast;
+import com.commonsware.cwac.endless.EndlessAdapter;
 import com.google.common.base.Preconditions;
 import com.mrd.bitlib.model.Address;
-import com.mrd.bitlib.util.ByteWriter;
-import com.mrd.mbwapi.api.QueryTransactionSummaryResponse;
-import com.mrd.mbwapi.api.TransactionSummary;
-import com.mrd.mbwapi.util.TransactionSummaryUtils;
-import com.mrd.mbwapi.util.TransactionType;
-import com.mycelium.wallet.AddressBookManager;
+import com.mrd.bitlib.util.Sha256Hash;
+import com.mycelium.wallet.coinapult.CoinapultTransactionSummary;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
-import com.mycelium.wallet.RecordManager;
-import com.mycelium.wallet.Wallet;
+import com.mycelium.wallet.Utils;
 import com.mycelium.wallet.activity.TransactionDetailsActivity;
+import com.mycelium.wallet.activity.modern.Toaster;
+import com.mycelium.wallet.activity.send.BroadcastTransactionActivity;
 import com.mycelium.wallet.activity.util.EnterAddressLabelUtil;
-import com.mycelium.wallet.activity.util.EnterAddressLabelUtil.AddressLabelChangedHandler;
-import com.mycelium.wallet.api.ApiCache;
-import com.mycelium.wallet.event.TransactionHistoryReady;
+import com.mycelium.wallet.event.AddressBookChanged;
+import com.mycelium.wallet.event.ExchangeRatesRefreshed;
+import com.mycelium.wallet.event.SelectedCurrencyChanged;
+import com.mycelium.wallet.event.SyncStopped;
+import com.mycelium.wallet.persistence.MetadataStorage;
+import com.mycelium.wapi.model.TransactionSummary;
+import com.mycelium.wapi.wallet.WalletAccount;
+import com.mycelium.wapi.wallet.WalletManager;
 import com.squareup.otto.Subscribe;
+
+import java.util.*;
 
 public class TransactionHistoryFragment extends Fragment {
 
    private MbwManager _mbwManager;
-   private RecordManager _recordManager;
+   private MetadataStorage _storage;
    private View _root;
-   private ApiCache _cache;
-   private AddressBookManager _addressBook;
    private ActionMode currentActionMode;
-   private AddressLabelChangedHandler addressLabelChanged = new AddressLabelChangedHandler() {
-
-      @Override
-      public void OnAddressLabelChanged(String address, String label) {
-         updateTransactionHistory();
-      }
-   };
+   private volatile Map<Address, String> _addressBook;
 
    @Override
    public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
       _root = inflater.inflate(R.layout.main_transaction_history_view, container, false);
+
+      _root.findViewById(R.id.btRescan).setOnClickListener(new View.OnClickListener() {
+         @Override
+         public void onClick(View view) {
+            _mbwManager.getSelectedAccount().dropCachedData();
+            _mbwManager.getWalletManager(false).startSynchronization();
+         }
+      });
+
       return _root;
    }
 
@@ -104,22 +97,26 @@ public class TransactionHistoryFragment extends Fragment {
    public void onCreate(Bundle savedInstanceState) {
       setHasOptionsMenu(true);
       super.onCreate(savedInstanceState);
+
+      // cache the addressbook for faster lookup
+      cacheAddressBook();
    }
 
    @Override
    public void onAttach(Activity activity) {
-      _mbwManager = MbwManager.getInstance(activity);
-      _recordManager = _mbwManager.getRecordManager();
-      _addressBook = _mbwManager.getAddressBookManager();
-      _cache = _mbwManager.getCache();
       super.onAttach(activity);
+      _mbwManager = MbwManager.getInstance(activity);
+      _storage = _mbwManager.getMetadataStorage();
+
+
    }
 
    @Override
    public void onResume() {
       _mbwManager.getEventBus().register(this);
-      // Update from cache
-      updateTransactionHistory();
+      if (_mbwManager.getWalletManager(false).getState() == WalletManager.State.READY) {
+         updateTransactionHistory();
+      }
       super.onResume();
    }
 
@@ -129,25 +126,33 @@ public class TransactionHistoryFragment extends Fragment {
       super.onPause();
    }
 
-   @Override
-   public void onDetach() {
-      super.onDetach();
-   }
-
    @Subscribe
-   public void transactionsUpdated(TransactionHistoryReady transactionHistoryReady) {
+   public void syncStopped(SyncStopped event) {
       updateTransactionHistory();
    }
 
-   private void doSetLabel(TransactionSummary selected) {
-      if (selected == null) {
-         return;
-      }
-      // Set the label of the address
-      String address = getSingleForeignAddressForTransaction(selected);
-      if (address != null) {
-         EnterAddressLabelUtil.enterAddressLabel(getActivity(), _addressBook, address, "", addressLabelChanged);
-      }
+   @Subscribe
+   public void exchangeRateChanged(ExchangeRatesRefreshed event) {
+      refreshList();
+   }
+
+   private void refreshList() {
+      ((ListView) _root.findViewById(R.id.lvTransactionHistory)).invalidateViews();
+   }
+
+   @Subscribe
+   public void fiatCurrencyChanged(SelectedCurrencyChanged event) {
+      refreshList();
+   }
+
+   @Subscribe
+   public void addressBookEntryChanged(AddressBookChanged event) {
+      cacheAddressBook();
+      refreshList();
+   }
+
+   private void cacheAddressBook() {
+      _addressBook = _mbwManager.getMetadataStorage().getAllAddressLabels();
    }
 
    private void doShowDetails(TransactionSummary selected) {
@@ -156,24 +161,8 @@ public class TransactionHistoryFragment extends Fragment {
       }
       // Open transaction details
       Intent intent = new Intent(getActivity(), TransactionDetailsActivity.class);
-      ByteWriter writer = new ByteWriter(1024 * 10);
-      selected.serialize(writer);
-      intent.putExtra("transaction", writer.toBytes());
+      intent.putExtra("transaction", selected.txid);
       startActivity(intent);
-   }
-
-   private String getSingleForeignAddressForTransaction(TransactionSummary tx) {
-      if (tx == null) {
-         return null;
-      }
-      Wallet wallet = getWallet();
-      Set<Address> addressSet = wallet.getAddressSet();
-      TransactionType type = TransactionSummaryUtils.getTransactionType(tx, addressSet);
-      return type.singleForeignAddress(tx, addressSet);
-   }
-
-   private Wallet getWallet() {
-      return _recordManager.getWallet(_mbwManager.getWalletMode());
    }
 
    @SuppressWarnings("unchecked")
@@ -181,8 +170,21 @@ public class TransactionHistoryFragment extends Fragment {
       if (!isAdded()) {
          return;
       }
-      Set<Address> addressSet = getWallet().getAddressSet();
-      new AsyncTransactionHistoryUpdate().execute(addressSet);
+      WalletAccount account = _mbwManager.getSelectedAccount();
+      if (account.isArchived()) {
+         return;
+      }
+      List<TransactionSummary> history = account.getTransactionHistory(0, 20);
+      if (history.isEmpty()) {
+         _root.findViewById(R.id.llNoRecords).setVisibility(View.VISIBLE);
+         _root.findViewById(R.id.lvTransactionHistory).setVisibility(View.GONE);
+      } else {
+         _root.findViewById(R.id.llNoRecords).setVisibility(View.GONE);
+         _root.findViewById(R.id.lvTransactionHistory).setVisibility(View.VISIBLE);
+         Wrapper wrapper = new Wrapper(getActivity(), history);
+         ((ListView) _root.findViewById(R.id.lvTransactionHistory)).setAdapter(wrapper);
+         refreshList();
+      }
    }
 
    @Override
@@ -199,78 +201,15 @@ public class TransactionHistoryFragment extends Fragment {
       }
    }
 
-   private void fillInAddressBookNames(String[] addresses) {
-      for (int i = 0; i < addresses.length; i++) {
-         String name = _addressBook.getNameByAddress(addresses[i]);
-         if (name.length() != 0) {
-            addresses[i] = name;
-         }
-      }
-   }
+   private class TransactionHistoryAdapter extends TransactionArrayAdapter {
 
-   private class AsyncTransactionHistoryUpdate extends AsyncTask<Set<Address>, Void, QueryTransactionSummaryResponse> {
-
-      @Override
-      protected QueryTransactionSummaryResponse doInBackground(Set<Address>... arg0) {
-         Set<Address> addressSet = getWallet().getAddressSet();
-         QueryTransactionSummaryResponse result = _cache.getTransactionSummaryList(addressSet);
-         if (result != null) {
-            Collections.sort(result.transactions);
-         }
-         return result;
+      public TransactionHistoryAdapter(Context context, List<TransactionSummary> transactions) {
+         super(context, transactions, TransactionHistoryFragment.this, _addressBook, false);
       }
 
       @Override
-      protected void onPostExecute(QueryTransactionSummaryResponse result) {
-         if (!isAdded()) {
-            return;
-         }
-         if (result == null || result.transactions.size() == 0) {
-            _root.findViewById(R.id.tvNoRecords).setVisibility(View.VISIBLE);
-            _root.findViewById(R.id.lvTransactionHistory).setVisibility(View.GONE);
-         } else {
-            _root.findViewById(R.id.tvNoRecords).setVisibility(View.GONE);
-            _root.findViewById(R.id.lvTransactionHistory).setVisibility(View.VISIBLE);
-            TransactionHistoryAdapter _transactionHistoryAdapter = new TransactionHistoryAdapter(getActivity(), result);
-            ((ListView) _root.findViewById(R.id.lvTransactionHistory)).setAdapter(_transactionHistoryAdapter);
-         }
-         super.onPostExecute(result);
-      }
-   }
-
-   private class TransactionHistoryAdapter extends ArrayAdapter<TransactionSummary> {
-      private Context _context;
-      private Date _midnight;
-      private DateFormat _dayFormat;
-      private DateFormat _hourFormat;
-      private Set<Address> _addressSet;
-      private int _chainHeight;
-
-      public TransactionHistoryAdapter(Context context, QueryTransactionSummaryResponse transactions) {
-         super(context, R.layout.transaction_row, transactions.transactions);
-         _context = context;
-         _chainHeight = transactions.chainHeight;
-         // Get the time at last midnight
-         Calendar midnight = Calendar.getInstance();
-         midnight.set(midnight.get(Calendar.YEAR), midnight.get(Calendar.MONTH), midnight.get(Calendar.DAY_OF_MONTH),
-               0, 0, 0);
-         _midnight = midnight.getTime();
-         // Create date formats for hourly and day format
-         Locale locale = getResources().getConfiguration().locale;
-         _dayFormat = DateFormat.getDateInstance(DateFormat.SHORT, locale);
-         _hourFormat = android.text.format.DateFormat.getTimeFormat(_context);
-         Wallet wallet = getWallet();
-         _addressSet = wallet.getAddressSet();
-      }
-
-      @Override
-      public View getView(int position, View convertView, ViewGroup parent) {
-         // Only inflate a new view if we are not reusing an old one
-         View rowView = convertView;
-         if (rowView == null) {
-            LayoutInflater inflater = (LayoutInflater) _context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-            rowView = Preconditions.checkNotNull(inflater.inflate(R.layout.transaction_row, parent, false));
-         }
+      public View getView(final int position, View convertView, ViewGroup parent) {
+         View rowView = super.getView(position, convertView, parent);
 
          // Make sure we are still added
          if (!isAdded()) {
@@ -289,86 +228,210 @@ public class TransactionHistoryFragment extends Fragment {
                   @Override
                   public boolean onCreateActionMode(ActionMode actionMode, Menu menu) {
                      actionMode.getMenuInflater().inflate(R.menu.transaction_history_context_menu, menu);
+                     //we only allow address book entries for outgoing transactions
+                     updateActionBar(actionMode, menu);
                      return true;
                   }
 
-                  @SuppressWarnings("deprecation")
                   @Override
                   public boolean onPrepareActionMode(ActionMode actionMode, Menu menu) {
-                     String address = getSingleForeignAddressForTransaction(record);
-                     Preconditions.checkNotNull(menu.findItem(R.id.miAddToAddressBook)).setVisible(address != null);
-                     currentActionMode = actionMode;
-                     view.setBackgroundDrawable(getResources().getDrawable(R.color.selectedrecord));
+                     updateActionBar(actionMode, menu);
                      return true;
+                  }
+
+                  private void updateActionBar(ActionMode actionMode, Menu menu) {
+                     Preconditions.checkNotNull(menu.findItem(R.id.miAddToAddressBook)).setVisible(record.hasAddressBook());
+                     Preconditions.checkNotNull(menu.findItem(R.id.miCancelTransaction)).setVisible(record.canCancel());
+                     Preconditions.checkNotNull(menu.findItem(R.id.miShowDetails)).setVisible(record.hasDetails());
+                     Preconditions.checkNotNull(menu.findItem(R.id.miShowCoinapultDebug)).setVisible(record.canCoinapult());
+                     Preconditions.checkNotNull(menu.findItem(R.id.miRebroadcastTransaction)).setVisible((record.confirmations == 0) && !record.canCoinapult());
+
+                     //deletion is disabled for now, to enable, replace false with record.confirmations == 0
+                     Preconditions.checkNotNull(menu.findItem(R.id.miDeleteUnconfirmedTransaction)).setVisible(false);
+                     currentActionMode = actionMode;
+                     ((ListView) _root.findViewById(R.id.lvTransactionHistory)).setItemChecked(position, true);
                   }
 
                   @Override
                   public boolean onActionItemClicked(ActionMode actionMode, MenuItem menuItem) {
                      final int itemId = menuItem.getItemId();
-                     if (itemId == R.id.miAddToAddressBook) {
-                        doSetLabel(record);
-                        finishActionMode();
+                     if (itemId == R.id.miShowCoinapultDebug) {
+                        if (record instanceof CoinapultTransactionSummary) {
+                           final CoinapultTransactionSummary summary = (CoinapultTransactionSummary) record;
+                           new AlertDialog.Builder(_context)
+                                 .setMessage(summary.input.toString())
+                                 .setNeutralButton(R.string.copy, new DialogInterface.OnClickListener() {
+                                    @Override
+                                    public void onClick(DialogInterface dialog, int which) {
+                                       Utils.setClipboardString(
+                                             summary.input.toString(),
+                                             TransactionHistoryFragment.this.getActivity());
+                                       Toast.makeText(
+                                             TransactionHistoryFragment.this.getActivity(),
+                                             R.string.copied_to_clipboard, Toast.LENGTH_SHORT)
+                                             .show();
+
+                                       dialog.dismiss();
+                                    }
+                                 })
+                                 .setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
+                                    @Override
+                                    public void onClick(DialogInterface dialog, int which) {
+                                       dialog.dismiss();
+                                    }
+                                 })
+                                 .show();
+                        }
                         return true;
-                     } else if (itemId == R.id.miShowDetails) {
+                     }
+                     if (itemId == R.id.miShowDetails) {
                         doShowDetails(record);
                         finishActionMode();
                         return true;
+                     } else if (itemId == R.id.miSetLabel) {
+                        setTransactionLabel(record);
+                        finishActionMode();
+                     } else if (itemId == R.id.miAddToAddressBook) {
+                        EnterAddressLabelUtil.enterAddressLabel(getActivity(), _mbwManager.getMetadataStorage(), record.destinationAddress.get(), "", addressLabelChanged);
+                     } else if (itemId == R.id.miCancelTransaction) {
+                        new AlertDialog.Builder(getActivity())
+                              .setTitle(_context.getString(R.string.remove_queued_transaction_title))
+                              .setMessage(_context.getString(R.string.remove_queued_transaction))
+                              .setPositiveButton(R.string.yes, new DialogInterface.OnClickListener() {
+                                 @Override
+                                 public void onClick(DialogInterface dialog, int which) {
+                                    boolean okay = _mbwManager.getSelectedAccount().cancelQueuedTransaction(record.txid);
+                                    dialog.dismiss();
+                                    updateTransactionHistory();
+                                    if (okay) {
+                                       Utils.showSimpleMessageDialog(getActivity(), _context.getString(R.string.remove_queued_transaction_hint));
+                                    } else {
+                                       new Toaster(getActivity()).toast(_context.getString(R.string.remove_queued_transaction_error), false);
+                                    }
+                                 }
+                              })
+                              .setNegativeButton(R.string.no, new DialogInterface.OnClickListener() {
+                                 @Override
+                                 public void onClick(DialogInterface dialog, int which) {
+                                    dialog.dismiss();
+                                 }
+                              })
+                              .create().show();
+                     } else if (itemId == R.id.miDeleteUnconfirmedTransaction) {
+                        new AlertDialog.Builder(getActivity())
+                              .setTitle(_context.getString(R.string.delete_unconfirmed_transaction_title))
+                              .setMessage(_context.getString(R.string.warning_delete_unconfirmed_transaction))
+                              .setPositiveButton(R.string.yes, new DialogInterface.OnClickListener() {
+                                 @Override
+                                 public void onClick(DialogInterface dialog, int which) {
+                                    _mbwManager.getSelectedAccount().deleteTransaction(record.txid);
+                                    dialog.dismiss();
+                                    updateTransactionHistory();
+                                 }
+                              })
+                              .setNegativeButton(R.string.no, new DialogInterface.OnClickListener() {
+                                 @Override
+                                 public void onClick(DialogInterface dialog, int which) {
+                                    dialog.dismiss();
+                                 }
+                              })
+                              .create().show();
+                     } else if (itemId == R.id.miRebroadcastTransaction) {
+                        new AlertDialog.Builder(getActivity())
+                              .setTitle(_context.getString(R.string.rebroadcast_transaction_title))
+                              .setMessage(_context.getString(R.string.description_rebroadcast_transaction))
+                              .setPositiveButton(R.string.yes, new DialogInterface.OnClickListener() {
+                                 @Override
+                                 public void onClick(DialogInterface dialog, int which) {
+                                    boolean success = BroadcastTransactionActivity.callMe(getActivity(), _mbwManager.getSelectedAccount(), record.txid);
+                                    if (!success) {
+                                       Utils.showSimpleMessageDialog(getActivity(), _context.getString(R.string.message_rebroadcast_successfull));
+                                    }
+                                    dialog.dismiss();
+                                 }
+                              })
+                              .setNegativeButton(R.string.no, new DialogInterface.OnClickListener() {
+                                 @Override
+                                 public void onClick(DialogInterface dialog, int which) {
+                                    dialog.dismiss();
+                                 }
+                              })
+                              .create().show();
                      }
                      return false;
                   }
 
-                  @SuppressWarnings("deprecation")
                   @Override
                   public void onDestroyActionMode(ActionMode actionMode) {
-                     view.setBackgroundDrawable(null);
+                     ((ListView) _root.findViewById(R.id.lvTransactionHistory)).setItemChecked(position, false);
                      currentActionMode = null;
                   }
                });
             }
          });
 
-         TransactionType type = TransactionSummaryUtils.getTransactionType(record, _addressSet);
-
-         // Determine Value
-         long value = TransactionSummaryUtils.calculateBalanceChange(record, _addressSet);
-
-         // Determine Color
-         int color;
-         if (value < 0) {
-            color = getResources().getColor(R.color.red);
-         } else {
-            color = getResources().getColor(R.color.green);
-         }
-
-         // Set Date
-         Date date = new Date(record.time * 1000L);
-         DateFormat dateFormat = date.before(_midnight) ? _dayFormat : _hourFormat;
-         TextView tvDate = (TextView) rowView.findViewById(R.id.tvDate);
-         tvDate.setText(dateFormat.format(date));
-
-         // Set value
-         TextView tvAmount = (TextView) rowView.findViewById(R.id.tvAmount);
-         tvAmount.setText(_mbwManager.getBtcValueString(value));
-         tvAmount.setTextColor(color);
-
-         // Determine list of addresses
-         final String[] addresses = type.relevantAddresses(record, _addressSet);
-
-         // Replace addresses with known names from the address book
-         fillInAddressBookNames(addresses);
-         TextView tvAddress = (TextView) rowView.findViewById(R.id.tvAddress);
-         tvAddress.setText(Joiner.on(" ").join(addresses));
-
-         // Set confirmations
-         int confirmations = record.calculateConfirmatons(_chainHeight);
-         TextView tvConfirmations = (TextView) rowView.findViewById(R.id.tvConfirmations);
-         tvConfirmations.setText(_context.getResources().getString(R.string.confirmations, confirmations));
-
-         rowView.setTag(record);
-
          return rowView;
       }
-
    }
 
+   private EnterAddressLabelUtil.AddressLabelChangedHandler addressLabelChanged = new EnterAddressLabelUtil.AddressLabelChangedHandler() {
+      @Override
+      public void OnAddressLabelChanged(Address address, String label) {
+         _mbwManager.getEventBus().post(new AddressBookChanged());
+         updateTransactionHistory();
+      }
+   };
+
+   private void setTransactionLabel(TransactionSummary record) {
+      EnterAddressLabelUtil.enterTransactionLabel(getActivity(), record.txid, _storage, transactionLabelChanged);
+   }
+
+   private EnterAddressLabelUtil.TransactionLabelChangedHandler transactionLabelChanged = new EnterAddressLabelUtil.TransactionLabelChangedHandler() {
+
+      @Override
+      public void OnTransactionLabelChanged(Sha256Hash txid, String label) {
+         updateTransactionHistory();
+      }
+   };
+
+   private class Wrapper extends EndlessAdapter {
+      private List<TransactionSummary> _toAdd;
+      private final Object _toAddLock = new Object();
+      private int lastOffset;
+      private int chunkSize;
+
+      private Wrapper(Context context, List<TransactionSummary> transactions) {
+         super(new TransactionHistoryAdapter(context, transactions));
+         _toAdd = new ArrayList<TransactionSummary>();
+         lastOffset = 0;
+         chunkSize = 20;
+      }
+
+      @Override
+      protected View getPendingView(ViewGroup parent) {
+         //this is an empty view, getting more transaction details is fast at the moment
+         return LayoutInflater.from(parent.getContext()).inflate(R.layout.transaction_history_fetching, null);
+      }
+
+      @Override
+      protected boolean cacheInBackground() {
+         WalletAccount acc = _mbwManager.getSelectedAccount();
+         synchronized (_toAddLock) {
+            lastOffset += chunkSize;
+            _toAdd = acc.getTransactionHistory(lastOffset, chunkSize);
+         }
+         return _toAdd.size() == chunkSize;
+      }
+
+      @Override
+      protected void appendCachedData() {
+         synchronized (_toAddLock) {
+            TransactionHistoryAdapter a = (TransactionHistoryAdapter) getWrappedAdapter();
+            for (TransactionSummary item : _toAdd) {
+               a.add(item);
+            }
+            _toAdd.clear();
+         }
+      }
+   }
 }

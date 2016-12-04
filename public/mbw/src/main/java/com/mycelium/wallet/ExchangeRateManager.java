@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,106 +34,76 @@
 
 package com.mycelium.wallet;
 
-import java.util.LinkedList;
-import java.util.List;
-
 import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.SharedPreferences.Editor;
-import android.os.Handler;
+import com.google.common.collect.ImmutableList;
+import com.mycelium.wapi.wallet.currency.ExchangeRateProvider;
+import com.mycelium.wapi.api.Wapi;
+import com.mycelium.wapi.api.WapiException;
+import com.mycelium.wapi.api.request.QueryExchangeRatesRequest;
+import com.mycelium.wapi.api.response.QueryExchangeRatesResponse;
+import com.mycelium.wapi.model.ExchangeRate;
 
-import com.mrd.bitlib.util.ByteReader;
-import com.mrd.bitlib.util.ByteWriter;
-import com.mrd.bitlib.util.HexUtils;
-import com.mrd.mbwapi.api.ApiException;
-import com.mrd.mbwapi.api.ApiObject;
-import com.mrd.mbwapi.api.ExchangeRate;
-import com.mrd.mbwapi.api.MyceliumWalletApi;
-import com.mrd.mbwapi.api.QueryExchangeRatesRequest;
-import com.mrd.mbwapi.api.QueryExchangeRatesResponse;
+import java.util.*;
 
-public class ExchangeRateManager {
+public class ExchangeRateManager implements ExchangeRateProvider {
 
-   private static final int MAX_RATE_AGE_MS = 1000 * 60;
-   private static final String EXCHANGE_DATA = "exchange_rate_data";
+   private static final int MAX_RATE_AGE_MS = 5 * 1000 * 60;
+   private static final String EXCHANGE_DATA = "wapi_exchange_rates";
 
-   public static abstract class EventSubscriber {
-
-      private Handler _handler;
-
-      public EventSubscriber(Handler handler) {
-         _handler = handler;
-      }
-
-      public Handler getHandler() {
-         return _handler;
-      }
-
-      public abstract void refreshingEcahngeRatesSuccedded();
-
-      public abstract void refreshingExchangeRatesFailed();
+   public interface Observer {
+      void refreshingExchangeRatesSucceeded();
+      void refreshingExchangeRatesFailed();
    }
 
-   private Context _applicationContext;
-   private MyceliumWalletApi _api;
-   private MbwManager _mbwManager;
-   private QueryExchangeRatesResponse _latestRates;
-   private String _currentRateName;
+   private final Context _applicationContext;
+   private final Wapi _api;
+
+   private volatile List<String> _fiatCurrencies;
+   private Map<String, QueryExchangeRatesResponse> _latestRates;
    private long _latestRatesTime;
    private volatile Fetcher _fetcher;
-   private Object _requestLock;
-   private List<EventSubscriber> _subscribers;
+   private final Object _requestLock = new Object();
+   private final List<Observer> _subscribers;
+   private String _currentExchangeSourceName;
 
-   public ExchangeRateManager(Context applicationContext, MyceliumWalletApi api, MbwManager manager) {
+   public ExchangeRateManager(Context applicationContext, Wapi api) {
       _applicationContext = applicationContext;
       _api = api;
-      _mbwManager = manager;
-      SharedPreferences settings = _applicationContext.getSharedPreferences(EXCHANGE_DATA, Activity.MODE_PRIVATE);
+      _latestRates = null;
+      _latestRatesTime = 0;
+      _currentExchangeSourceName = getPreferences().getString("currentRateName", null);
 
-      // Load the latest rates if we have them
-      String latestRatesString = settings.getString("latestRates", null);
-      if (latestRatesString != null) {
-         try {
-            byte[] bytes = HexUtils.toBytes(latestRatesString);
-            _latestRates = ApiObject.deserialize(QueryExchangeRatesResponse.class, new ByteReader(bytes));
-         } catch (RuntimeException e) {
-            // ignore, let the last rates remain unknown
-         } catch (ApiException e) {
-            // ignore, let the last rates remain unknown
-         }
-      }
-
-      // Load latest rates time
-      _latestRatesTime = settings.getLong("latestRatesTime", 0);
-
-      // Load the name of the current exchange rate
-      _currentRateName = settings.getString("currentRateName", null);
-
-      _requestLock = new Object();
-
-      _subscribers = new LinkedList<EventSubscriber>();
+      _subscribers = new LinkedList<Observer>();
+      _latestRates = new HashMap<String, QueryExchangeRatesResponse>();
    }
 
-   public synchronized void subscribe(EventSubscriber subscriber) {
+   public synchronized void subscribe(Observer subscriber) {
       _subscribers.add(subscriber);
    }
 
-   public synchronized void unsubscribe(EventSubscriber subscriber) {
+   public synchronized void unsubscribe(Observer subscriber) {
       _subscribers.remove(subscriber);
    }
 
    private class Fetcher implements Runnable {
       public void run() {
          try {
-            QueryExchangeRatesResponse response = _api.queryExchangeRates(new QueryExchangeRatesRequest(_mbwManager
-                  .getFiatCurrency()));
+            List<QueryExchangeRatesResponse> responses = new ArrayList<QueryExchangeRatesResponse>();
+            List<String> selectedCurrencies;
             synchronized (_requestLock) {
-               setLatestRates(response);
+               selectedCurrencies = new ArrayList<String>(_fiatCurrencies);
+            }
+            for (String currency : selectedCurrencies) {
+               responses.add(_api.queryExchangeRates(new QueryExchangeRatesRequest(Wapi.VERSION, currency)).getResult());
+            }
+            synchronized (_requestLock) {
+               setLatestRates(responses);
                _fetcher = null;
                notifyRefreshingExchangeRatesSucceeded();
             }
-         } catch (ApiException e) {
+         } catch (WapiException e) {
             // we failed to get the exchange rate
             synchronized (_requestLock) {
                _fetcher = null;
@@ -144,81 +114,69 @@ public class ExchangeRateManager {
    }
 
    private synchronized void notifyRefreshingExchangeRatesSucceeded() {
-      for (final EventSubscriber s : _subscribers) {
-         s.getHandler().post(new Runnable() {
-
-            @Override
-            public void run() {
-               s.refreshingEcahngeRatesSuccedded();
-            }
-         });
+      for (final Observer s : _subscribers) {
+         s.refreshingExchangeRatesSucceeded();
       }
    }
 
    private synchronized void notifyRefreshingExchangeRatesFailed() {
-      for (final EventSubscriber s : _subscribers) {
-         s.getHandler().post(new Runnable() {
+      for (final Observer s : _subscribers) {
+         s.refreshingExchangeRatesFailed();
+      }
+   }
 
-            @Override
-            public void run() {
-               s.refreshingExchangeRatesFailed();
-            }
-         });
+   // only refresh if last refresh is old
+   public void requestOptionalRefresh(){
+      if (System.currentTimeMillis() - _latestRatesTime > (MAX_RATE_AGE_MS/2) ){
+         requestRefresh();
       }
    }
 
    public void requestRefresh() {
       synchronized (_requestLock) {
+         // Only start fetching if we are not already on it
          if (_fetcher == null) {
             _fetcher = new Fetcher();
             Thread t = new Thread(_fetcher);
             t.setDaemon(true);
             t.start();
-         } else {
-            // request already in progress
-            return;
          }
       }
    }
 
-   private synchronized void setLatestRates(QueryExchangeRatesResponse latestRates) {
-      _latestRates = latestRates;
+   private synchronized void setLatestRates(List<QueryExchangeRatesResponse> latestRates) {
+      _latestRates = new HashMap<String, QueryExchangeRatesResponse>();
+      for (QueryExchangeRatesResponse response : latestRates) {
+         _latestRates.put(response.currency, response);
+      }
       _latestRatesTime = System.currentTimeMillis();
 
-      if (_currentRateName == null) {
+      if (_currentExchangeSourceName == null) {
          // This only happens the first time the wallet picks up exchange rates.
          // We will default to the first one in the list
-         if (_latestRates.exchangeRates.length > 0) {
-            _currentRateName = _latestRates.exchangeRates[0].name;
+         if (latestRates.size() > 0 && latestRates.get(0).exchangeRates.length > 0) {
+            _currentExchangeSourceName = latestRates.get(0).exchangeRates[0].name;
          }
       }
-      // Turn latest rates into a string
-      ByteWriter writer = new ByteWriter(2048);
-      latestRates.serialize(writer);
-      String latestRatesString = HexUtils.toHex(writer.toBytes());
-
-      // Persist
-      Editor editor = getEditor();
-      editor.putString("latestRates", latestRatesString);
-      editor.putLong("latestRatesTime", _latestRatesTime);
-      editor.commit();
    }
 
    /**
     * Get the name of the current exchange rate. May be null the first time the
     * app is running
     */
-   public String getCurrentRateName() {
-      return _currentRateName;
+   public String getCurrentExchangeSourceName() {
+      return _currentExchangeSourceName;
    }
 
    /**
     * Get the names of the currently available exchange rates. May be empty the
     * first time the app is running
     */
-   public List<String> getExchangeRateNames() {
-      QueryExchangeRatesResponse latestRates = _latestRates;
+   public synchronized List<String> getExchangeSourceNames() {
       List<String> result = new LinkedList<String>();
+      //check whether we have any rates
+      if (_latestRates.isEmpty()) return result;
+      QueryExchangeRatesResponse latestRates =  _latestRates.values().iterator().next();
       if (latestRates != null) {
          for (ExchangeRate r : latestRates.exchangeRates) {
             result.add(r.name);
@@ -227,33 +185,44 @@ public class ExchangeRateManager {
       return result;
    }
 
-   public synchronized void setCurrentRateName(String name) {
-      _currentRateName = name;
-      getEditor().putString("currentRateName", _currentRateName).commit();
+   public synchronized void setCurrentExchangeSourceName(String name) {
+      _currentExchangeSourceName = name;
+      getEditor().putString("currentRateName", _currentExchangeSourceName).commit();
    }
 
+
    /**
-    * Get the exchange rate for the currently selected currency.
-    * <p>
-    * Returns null if the current rate is too old or for a different currency.
+    * Get the exchange rate for the specified currency.
+    * <p/>
+    * Returns null if the current rate is too old
     * In that the case the caller could choose to call refreshRates() and listen
     * for callbacks. If a rate is returned the contained price may be null if
     * the currently chosen exchange source is not available.
     */
-   public synchronized ExchangeRate getExchangeRate() {
-      String currency = _mbwManager.getFiatCurrency();
-      if (_latestRates == null || !currency.equals(_latestRates.currency)
-            || _latestRatesTime + MAX_RATE_AGE_MS < System.currentTimeMillis()) {
+   @Override
+   public synchronized ExchangeRate getExchangeRate(String currency) {
+      if (_latestRates == null || _latestRates.isEmpty() || !_latestRates.containsKey(currency))  {
          return null;
       }
-      for (ExchangeRate r : _latestRates.exchangeRates) {
-         if (r.name.equals(_currentRateName)) {
+      if (_latestRatesTime + MAX_RATE_AGE_MS < System.currentTimeMillis()) {
+         //rate is too old, source seems to not be available
+         //we return a rate with null price to indicate there is something wrong with the exchange rate source
+         return ExchangeRate.missingRate(_currentExchangeSourceName, System.currentTimeMillis(),  currency);
+      }
+      for (ExchangeRate r : _latestRates.get(currency).exchangeRates) {
+         if (r.name.equals(_currentExchangeSourceName)) {
+            //if the price is 0, obviously something went wrong
+            if (r.price.equals(Double.valueOf(0))) {
+               //we return an exchange rate with null price -> indicating missing rate
+               return ExchangeRate.missingRate(_currentExchangeSourceName, System.currentTimeMillis(),  currency);
+            }
+            //everything is fine, return the rate
             return r;
          }
       }
-      if (_currentRateName != null) {
+      if (_currentExchangeSourceName != null) {
          // We end up here if the exchange is no longer on the list
-         return new ExchangeRate(_currentRateName, System.currentTimeMillis(), currency, null);
+         return ExchangeRate.missingRate(_currentExchangeSourceName, System.currentTimeMillis(),  currency);
       }
       return null;
    }
@@ -262,4 +231,19 @@ public class ExchangeRateManager {
       return _applicationContext.getSharedPreferences(EXCHANGE_DATA, Activity.MODE_PRIVATE).edit();
    }
 
+   private SharedPreferences getPreferences() {
+      return _applicationContext.getSharedPreferences(EXCHANGE_DATA, Activity.MODE_PRIVATE);
+   }
+
+   // set for which fiat currencies we should get fx rates for
+   public void setCurrencyList(Set<String> currencies) {
+
+      synchronized (_requestLock) {
+         // copy list to prevent changes from outside
+         ImmutableList.Builder<String> listBuilder = new ImmutableList.Builder<String>().addAll(currencies);
+         _fiatCurrencies = listBuilder.build();
+      }
+
+      requestRefresh();
+   }
 }

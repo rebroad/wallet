@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -96,16 +96,6 @@ public class TraderInfoFragment extends Fragment {
       super.onResume();
    }
 
-   @Override
-   public void onPause() {
-      super.onPause();
-   }
-
-   @Override
-   public void onDestroy() {
-      super.onDestroy();
-   }
-
    private void updateUi() {
       if (!isAdded()) {
          return;
@@ -131,8 +121,16 @@ public class TraderInfoFragment extends Fragment {
       _adapter.add(new InfoItem(getString(R.string.lt_trader_name_label), pti.nickname));
 
       // Show trader address
-      _adapter.add(new InfoItem(getString(R.string.lt_trader_address_label), pti.address.toMultiLineString()));
+      _adapter.add(new InfoItem(getString(R.string.lt_trader_address_label), pti.address.getShortAddress()));
 
+      // (PrivateInfo) eMail Address
+      if (ti != null) {
+         _adapter.add(new InfoItem(getString(R.string.lt_trader_email_address_label), ti.notificationEmail));
+      }
+
+      // Show trader last activity
+      _adapter.add(new InfoItem(getString(R.string.lt_trader_last_activity), LtAndroidUtils.getTimeSpanString(this.getActivity(), pti.idleTime)));
+      
       // Show trader age
       _adapter.add(new InfoItem(getString(R.string.lt_trader_age_label), getResources().getString(
             R.string.lt_time_in_days, pti.traderAgeMs / Constants.MS_PR_DAY)));
@@ -143,7 +141,7 @@ public class TraderInfoFragment extends Fragment {
       // Aborted Sells
       _adapter.add(new InfoItem(getString(R.string.lt_aborted_sells_label), Integer.toString(pti.abortedSales)));
 
-      // Sold Volume
+      // (PrivateInfo) Sold Volume
       if (ti != null) {
          _adapter.add(new InfoItem(getString(R.string.lt_total_sold_label), _mbwManager
                .getBtcValueString(ti.totalBtcSold)));
@@ -155,7 +153,7 @@ public class TraderInfoFragment extends Fragment {
       // Aborted Buys
       _adapter.add(new InfoItem(getString(R.string.lt_aborted_buys_label), Integer.toString(pti.abortedBuys)));
 
-      // Bought Volume
+      // (PrivateInfo) Bought Volume
       if (ti != null) {
          _adapter.add(new InfoItem(getString(R.string.lt_total_bought_label), _mbwManager
                .getBtcValueString(ti.totalBtcBought)));
@@ -171,7 +169,7 @@ public class TraderInfoFragment extends Fragment {
          _adapter.add(new InfoItem(getString(R.string.lt_expected_trade_time_label), hourString));
       }
 
-      // Local Trader Commission
+      // (PrivateInfo) Local Trader Commission
       if (ti != null) {
          _adapter.add(new InfoItem(getString(R.string.lt_local_trader_commission_label), roundDoubleHalfUp(
                ti.localTraderPremium, 2).toString()

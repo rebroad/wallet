@@ -7,7 +7,13 @@
 #ignore xzing version trickery
 -dontwarn com.google.zxing.**
 -dontwarn java.lang.management.**
+-dontwarn javax.naming.**
+-dontwarn okio.**
 
+#spongycastle/coinapult
+-keep class org.spongycastle.**
+-dontwarn org.spongycastle.jce.provider.X509LDAPCertStoreSpi
+-dontwarn org.spongycastle.x509.util.LDAPStoreHelper
 
 -keepclassmembers class ** {
     @com.squareup.otto.Subscribe public *;
@@ -15,7 +21,7 @@
 }
 
 -dontwarn android.support.**
-
+-dontwarn org.apache.xmlrpc.**
 
 -optimizationpasses 6
 
@@ -34,7 +40,7 @@
 #The -optimizations option disables some arithmetic simplifications that Dalvik 1.0 and 1.5 can't handle. Note that the Dalvik VM also can't handle aggressive overloading (of static fields).
 #To understand or change this check http://proguard.sourceforge.net/index.html#/manual/optimizations.html
 #added !code/allocation/variable to resolve build issue
--optimizations !field/removal/writeonly,!field/marking/private,!class/merging/*,!code/allocation/variable
+-optimizations !field/removal/writeonly,!field/marking/private,!class/merging/*,!code/allocation/variable, !class/unboxing/enum
 
 #To repackage classes on a single package
 #-repackageclasses ''
@@ -48,9 +54,9 @@
 -keep public class * extends android.app.Service
 -keep public class * extends android.content.BroadcastReceiver
 -keep public class * extends android.content.ContentProvider
+-keep public class * extends android.preference.Preference
 -keep public class com.android.vending.licensing.ILicensingService
--keep public class HoneycombAsyncTaskExecInterface
-
+-keep public class com.google.zxing.client.android.common.executor.HoneycombAsyncTaskExecInterface
 
 #To remove debug logs:
 -assumenosideeffects class android.util.Log {
@@ -89,6 +95,10 @@
     public <init>(android.content.Context, android.util.AttributeSet, int);
 }
 
+# GMS related classes
+-keep class com.google.android.gms.** { *; }
+-dontwarn com.google.android.gms.**
+
 #Maintain enums
 -keepclassmembers enum * {
     public static **[] values();
@@ -110,10 +120,77 @@
   <init>(...);
   *;
 }
+
+#keep classes used for deserializing json
+-keepclasseswithmembers class com.mycelium.wapi.** {
+  <init>(...);
+  *;
+}
+#keep classes used for deserializing json
+-keepclasseswithmembers class com.coinapult.** {
+  <init>(...);
+  *;
+}
+
+#keep classes used for deserializing json
+-keepclasseswithmembers class com.mycelium.wallet.bitid.json.** {
+  <init>(...);
+  *;
+}
+
+#keep classes used for deserializing payment requests
+-keepclasseswithmembers class org.bitcoin.protocols.** {
+  <init>(...);
+  *;
+}
+
 -keep public class com.mycelium.lt.api.** {
   <init>(...);
  }
 -dontwarn com.fasterxml.jackson.**
+
+
+# keep everything decorated with butterknife
+-keep class butterknife.** { *; }
+-dontwarn butterknife.internal.**
+-keep class **$$ViewInjector { *; }
+
+-keepclasseswithmembernames class * {
+    @butterknife.* <fields>;
+}
+
+-keepclasseswithmembernames class * {
+    @butterknife.* <methods>;
+}
+
+# retrofit + API interfaces
+-keep class retrofit.** { *; }
+-keep class com.mycelium.wallet.external.cashila.api.** { *; }
+-keep class com.mycelium.wallet.external.glidera.api.** { *; }
+-keepclassmembernames interface * {
+    @retrofit.http.* <methods>;
+}
+
+#-dontwarn rx.**
+-dontwarn retrofit.**
+
+# keep everything in ledger/nordpol
+-keep class nordpol.** { *; }
+
+# keep RX-relevant stuff
+-keepclassmembers class rx.internal.util.unsafe.*ArrayQueue*Field* {
+   long producerIndex;
+   long consumerIndex;
+}
+
+-keepclassmembers class rx.internal.util.unsafe.BaseLinkedQueueProducerNodeRef {
+    rx.internal.util.atomic.LinkedQueueNode producerNode;
+}
+
+-keepclassmembers class rx.internal.util.unsafe.BaseLinkedQueueConsumerNodeRef {
+    rx.internal.util.atomic.LinkedQueueNode consumerNode;
+}
+
 
 ###### ADDITIONAL OPTIONS NOT USED NORMALLY
 

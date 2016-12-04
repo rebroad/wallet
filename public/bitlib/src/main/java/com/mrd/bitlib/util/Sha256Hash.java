@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ import java.math.BigInteger;
 import java.util.Arrays;
 
 /**
- * represents the result of a SHA256 hashing operation
- * prefer to use the static factory methods.
+ * represents the result of a SHA256 hashing operation prefer to use the static
+ * factory methods.
  */
 public class Sha256Hash implements Serializable, Comparable<Sha256Hash> {
    private static final long serialVersionUID = 1L;
@@ -42,9 +42,25 @@ public class Sha256Hash implements Serializable, Comparable<Sha256Hash> {
       _hash = -1;
    }
 
+   public static Sha256Hash fromString(String hexString) {
+      try {
+         byte[] b = HexUtils.toBytes(hexString);
+         if (b.length != HASH_LENGTH) {
+            return null;
+         }
+         return new Sha256Hash(b);
+      } catch (RuntimeException e) {
+         // invalid hex string
+         return null;
+      }
+   }
+
    /**
-    * takes 32 bytes and stores them as hash. does not actually hash, this is done in HashUtils
-    * @param bytes to be stored
+    * takes 32 bytes and stores them as hash. does not actually hash, this is
+    * done in HashUtils
+    * 
+    * @param bytes
+    *           to be stored
     */
    public static Sha256Hash of(byte[] bytes) {
       return new Sha256Hash(bytes);
@@ -55,9 +71,9 @@ public class Sha256Hash implements Serializable, Comparable<Sha256Hash> {
    }
 
    private Sha256Hash(byte[] bytes, int offset) {
-      //defensive copy, since incoming bytes is of arbitrary length
+      // defensive copy, since incoming bytes is of arbitrary length
       _bytes = new byte[HASH_LENGTH];
-       System.arraycopy(bytes, offset, _bytes, 0, HASH_LENGTH);
+      System.arraycopy(bytes, offset, _bytes, 0, HASH_LENGTH);
       _hash = -1;
    }
 
@@ -119,7 +135,7 @@ public class Sha256Hash implements Serializable, Comparable<Sha256Hash> {
    }
 
    public boolean startsWith(byte[] checksum) {
-      Preconditions.checkArgument(checksum.length < HASH_LENGTH); //typcially 4
+      Preconditions.checkArgument(checksum.length < HASH_LENGTH); // typcially 4
       for (int i = 0, checksumLength = checksum.length; i < checksumLength; i++) {
          if (_bytes[i] != checksum[i]) {
             return false;
@@ -131,6 +147,12 @@ public class Sha256Hash implements Serializable, Comparable<Sha256Hash> {
    public byte[] firstFourBytes() {
       byte[] ret = new byte[4];
       System.arraycopy(_bytes, 0, ret, 0, 4);
+      return ret;
+   }
+
+   public byte[] firstNBytes(int n) {
+      byte[] ret = new byte[n];
+      System.arraycopy(_bytes, 0, ret, 0, n);
       return ret;
    }
 

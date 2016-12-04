@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -189,7 +189,12 @@ public class ChangePriceActivity extends Activity {
       @Override
       public void onClick(View arg0) {
          enableUi(false);
-         String priceFormulaId = Preconditions.checkNotNull(getSelectedPriceFormula()).id;
+         final PriceFormula selectedPriceFormula = getSelectedPriceFormula();
+         if (selectedPriceFormula == null){
+            // cancel if we dont have a price formula available - user can go back and retry it, but dont crash
+            return;
+         }
+         String priceFormulaId = Preconditions.checkNotNull(selectedPriceFormula).id;
          double premium = Preconditions.checkNotNull(getSelectedPremium());
          TradeChangeParameters params = new TradeChangeParameters(_tradeSession.id, priceFormulaId, premium);
          Intent result = new Intent();
@@ -422,7 +427,7 @@ public class ChangePriceActivity extends Activity {
          Utils.toastConnectionError(ChangePriceActivity.this);
          finish();
          return true;
-      };
+      }
 
       @Override
       public void onLtPriceFormulasFetched(java.util.List<PriceFormula> priceFormulas, GetPriceFormulas request) {
@@ -431,7 +436,7 @@ public class ChangePriceActivity extends Activity {
                _tradeSession.priceFormula);
          fetchNewPrice();
          updateUi();
-      };
+      }
 
       @Override
       public void onLtBtcSellPriceAssesed(BtcSellPrice btcSellPrice, AssessBtcSellPrice request) {
@@ -439,7 +444,7 @@ public class ChangePriceActivity extends Activity {
          _spPriceFormula.setEnabled(true);
          _spPremium.setEnabled(true);
          updateUi();
-      };
+      }
    };
 
 }

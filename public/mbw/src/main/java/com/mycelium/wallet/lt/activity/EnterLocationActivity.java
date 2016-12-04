@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,54 +34,59 @@
 
 package com.mycelium.wallet.lt.activity;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.widget.AdapterView;
+import android.widget.*;
 import android.widget.AdapterView.OnItemClickListener;
-import android.widget.ArrayAdapter;
-import android.widget.AutoCompleteTextView;
-import android.widget.Filter;
-import android.widget.Filterable;
-import android.widget.TextView;
 
 import com.google.common.collect.ImmutableList;
-import com.mycelium.lt.api.model.GpsLocation;
 import com.mycelium.lt.location.Geocode;
-import com.mycelium.lt.location.JsonCoder;
+import com.mycelium.lt.location.Geocoder;
+import com.mycelium.lt.location.GoogleMapsGeocoder;
 import com.mycelium.lt.location.RemoteGeocodeException;
+import com.mycelium.wallet.GpsLocationFetcher.GpsLocationEx;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
+import com.mycelium.wallet.activity.util.DelayAutoCompleteTextView;
 import com.mycelium.wallet.lt.AddressDescription;
-
-import java.util.List;
+import com.mycelium.wallet.lt.BackendGeocoder;
+import com.mycelium.wallet.lt.LocalTraderManager;
 
 public class EnterLocationActivity extends Activity {
 
    private String language;
-   private MbwManager mbwManager;
+   private MbwManager _mbwManager;
+   private LocalTraderManager _ltManager;
+   private Geocoder _geocoder;
 
    public static void callMeForResult(Activity currentActivity, int requestCode) {
       Intent intent = new Intent(currentActivity, EnterLocationActivity.class);
       currentActivity.startActivityForResult(intent, requestCode);
    }
 
-   private AutoCompleteTextView _atvLocation;
+   private DelayAutoCompleteTextView _atvLocation;
 
    @Override
    public void onCreate(Bundle savedInstanceState) {
       super.onCreate(savedInstanceState);
-      mbwManager = MbwManager.getInstance(this);
-      language = mbwManager.getLanguage();
-      setContentView(R.layout.lt_enter_location_activity);
+      _mbwManager = MbwManager.getInstance(this);
+      _ltManager = _mbwManager.getLocalTraderManager();
 
-      _atvLocation = (AutoCompleteTextView) findViewById(R.id.atvLocation);
+      _geocoder =  _ltManager.getGeocoder();
+
+      setContentView(R.layout.lt_enter_location_activity);
+      _atvLocation = (DelayAutoCompleteTextView) findViewById(R.id.atvLocation);
 
       _atvLocation.setAdapter(new PlacesAutoCompleteAdapter(this, R.layout.lt_location_item));
       _atvLocation.setThreshold(2);
+      _atvLocation.setDelay(400);
       _atvLocation.setOnItemClickListener(atvLocationItemClickListener);
 
       // Load saved state
@@ -93,17 +98,6 @@ public class EnterLocationActivity extends Activity {
 
    protected void onSaveInstanceState(Bundle outState) {
       outState.putSerializable("location", _atvLocation.getEditableText().toString());
-   }
-
-
-   @Override
-   protected void onResume() {
-      super.onResume();
-   }
-
-   @Override
-   protected void onPause() {
-      super.onPause();
    }
 
    OnItemClickListener atvLocationItemClickListener = new AdapterView.OnItemClickListener() {
@@ -118,41 +112,44 @@ public class EnterLocationActivity extends Activity {
 
    };
 
-   OnClickListener atvLocationClickListener = new OnClickListener() {
-
-      @Override
-      public void onClick(View arg0) {
-      }
-   };
-
-   private GpsLocation address2Location(AddressDescription addr) {
-      return new GpsLocation(addr.location.getLatitude(), addr.location.getLongitude(), addr.toString());
+   private GpsLocationEx address2Location(AddressDescription addr) {
+      return new GpsLocationEx(addr.location.getLatitude(), addr.location.getLongitude(), addr.toString(),
+            addr.location.getCountryCode());
    }
 
    private List<Geocode> autocompleteInternal(String input) {
-      JsonCoder geocoder = new JsonCoder(language);
+
       try {
-         List<Geocode> ret = geocoder.query(input, 5).results;
-         runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-               TextView tvError = (TextView) findViewById(R.id.tvError);
-               tvError.setVisibility(View.GONE);
-            }
-         });
+         List<Geocode> ret = _geocoder.query(input, 5).results;
+         hideGeocoderError();
          return ret;
       } catch (final RemoteGeocodeException ex) {
-         runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-               TextView tvError = (TextView) findViewById(R.id.tvError);
-               tvError.setVisibility(View.VISIBLE);
-               tvError.setText(String.format(getString(R.string.geocode_error), ex.status));
-            }
-         });
-         MbwManager.getInstance(this).reportIgnoredException(ex);
+         // We tried hard, but we failed...
+         showGeocoderError(ex);
+         MbwManager.getInstance(this).reportIgnoredException("used geocoder:" + _geocoder.toString(), ex);
          return ImmutableList.of();
       }
+   }
+
+   private void hideGeocoderError() {
+      runOnUiThread(new Runnable() {
+         @Override
+         public void run() {
+            TextView tvError = (TextView) findViewById(R.id.tvError);
+            tvError.setVisibility(View.GONE);
+         }
+      });
+   }
+
+   private void showGeocoderError(final RemoteGeocodeException ex) {
+      runOnUiThread(new Runnable() {
+         @Override
+         public void run() {
+            TextView tvError = (TextView) findViewById(R.id.tvError);
+            tvError.setVisibility(View.VISIBLE);
+            tvError.setText(String.format(getString(R.string.geocode_error), ex.status));
+         }
+      });
    }
 
    public class PlacesAutoCompleteAdapter extends ArrayAdapter<AddressDescription> implements Filterable {
@@ -162,14 +159,19 @@ public class EnterLocationActivity extends Activity {
          super(context, textViewResourceId);
       }
 
+
       @Override
       public int getCount() {
-         return resultList.size();
+         return resultList == null ? 0 : resultList.size();
       }
 
       @Override
       public AddressDescription getItem(int index) {
-         return new AddressDescription(resultList.get(index));
+         if (index < resultList.size() ) {
+            return new AddressDescription(resultList.get(index));
+         }else{
+            return null;
+         }
       }
 
       @Override
@@ -185,6 +187,8 @@ public class EnterLocationActivity extends Activity {
                   // Assign the data to the FilterResults
                   filterResults.values = resultList;
                   filterResults.count = resultList.size();
+               } else{
+                  resultList = new ArrayList<Geocode>();
                }
                return filterResults;
             }
@@ -202,3 +206,4 @@ public class EnterLocationActivity extends Activity {
    }
 
 }
+

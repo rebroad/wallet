@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,39 +34,41 @@
 
 package com.mycelium.wallet.activity.main;
 
-import android.app.Activity;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
-
+import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.mrd.bitlib.model.Address;
+import com.mrd.bitlib.model.HdDerivedAddress;
+import com.mycelium.wallet.BitcoinUriWithAddress;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
-import com.mycelium.wallet.Record;
-import com.mycelium.wallet.RecordManager;
 import com.mycelium.wallet.Utils;
 import com.mycelium.wallet.activity.receive.ReceiveCoinsActivity;
 import com.mycelium.wallet.activity.util.QrImageView;
-import com.mycelium.wallet.event.AddressBookChanged;
-import com.mycelium.wallet.event.RecordSetChanged;
-import com.mycelium.wallet.event.SelectedRecordChanged;
+import com.mycelium.wallet.event.AccountChanged;
+import com.mycelium.wallet.event.BalanceChanged;
+import com.mycelium.wallet.event.ReceivingAddressChanged;
 import com.squareup.otto.Bus;
 import com.squareup.otto.Subscribe;
 
 public class AddressFragment extends Fragment {
 
    private View _root;
+   private MbwManager _mbwManager;
+   private boolean _showBip44Path;
 
    @Override
    public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
       _root = Preconditions.checkNotNull(inflater.inflate(R.layout.address_view, container, false));
       QrImageView qrButton = (QrImageView) Preconditions.checkNotNull(_root.findViewById(R.id.ivQR));
-      qrButton.setQrCode(getUri());
       qrButton.setTapToCycleBrightness(false);
       qrButton.setOnClickListener(new QrClickListener());
       return _root;
@@ -75,12 +77,9 @@ public class AddressFragment extends Fragment {
    @Override
    public void onCreate(Bundle savedInstanceState) {
       setHasOptionsMenu(true);
+      _mbwManager = MbwManager.getInstance(getActivity());
+      _showBip44Path = _mbwManager.getMetadataStorage().getShowBip44Path();
       super.onCreate(savedInstanceState);
-   }
-
-   @Override
-   public void onAttach(Activity activity) {
-      super.onAttach(activity);
    }
 
    @Override
@@ -96,87 +95,103 @@ public class AddressFragment extends Fragment {
       super.onPause();
    }
 
-   @Override
-   public void onDetach() {
-      super.onDetach();
-   }
-
-   private MbwManager getMbwManager() {
-      return MbwManager.getInstance(getActivity());
-   }
-
    private Bus getEventBus() {
-      return getMbwManager().getEventBus();
-   }
-
-   Record getRecord() {
-      return getRecordManager().getSelectedRecord();
-   }
-
-   private RecordManager getRecordManager() {
-      return getMbwManager().getRecordManager();
+      return _mbwManager.getEventBus();
    }
 
    private void updateUi() {
       if (!isAdded()) {
          return;
       }
+      if (_mbwManager.getSelectedAccount().isArchived()) {
+         return;
+      }
 
       // Update QR code
       QrImageView qrButton = (QrImageView) Preconditions.checkNotNull(_root.findViewById(R.id.ivQR));
-      qrButton.setQrCode(getUri());
+
+      Optional<Address> receivingAddress = getAddress();
 
       // Update address
-      Address address = getRecord().address;
+      if (receivingAddress.isPresent()) {
+         // Set address
+         qrButton.setVisibility(View.VISIBLE);
+         qrButton.setQrCode(BitcoinUriWithAddress.fromAddress(receivingAddress.get()).toString());
+         String[] addressStrings = Utils.stringChopper(receivingAddress.get().toString(), 12);
+         ((TextView) _root.findViewById(R.id.tvAddress1)).setText(addressStrings[0]);
+         ((TextView) _root.findViewById(R.id.tvAddress2)).setText(addressStrings[1]);
+         ((TextView) _root.findViewById(R.id.tvAddress3)).setText(addressStrings[2]);
+         if (_showBip44Path && receivingAddress.get() instanceof HdDerivedAddress) {
+            HdDerivedAddress hdAdr = (HdDerivedAddress) receivingAddress.get();
+            ((TextView) _root.findViewById(R.id.tvAddressPath)).setText(hdAdr.getBip32Path().toString());
+         } else {
+            ((TextView) _root.findViewById(R.id.tvAddressPath)).setText("");
+         }
+      } else {
+         // No address available
+         qrButton.setVisibility(View.INVISIBLE);
+         ((TextView) _root.findViewById(R.id.tvAddress1)).setText("");
+         ((TextView) _root.findViewById(R.id.tvAddress2)).setText("");
+         ((TextView) _root.findViewById(R.id.tvAddress3)).setText("");
+         ((TextView) _root.findViewById(R.id.tvAddressPath)).setText("");
+      }
+
       // Show name of bitcoin address according to address book
       TextView tvAddressTitle = (TextView) _root.findViewById(R.id.tvAddressLabel);
-      String name = getMbwManager().getAddressBookManager().getNameByAddress(address.toString());
+      ImageView ivAccountType = (ImageView) _root.findViewById(R.id.ivAccountType);
+
+      String name = _mbwManager.getMetadataStorage().getLabelByAccount(_mbwManager.getSelectedAccount().getId());
       if (name.length() == 0) {
          tvAddressTitle.setVisibility(View.GONE);
+         ivAccountType.setVisibility(View.GONE);
       } else {
          tvAddressTitle.setVisibility(View.VISIBLE);
          tvAddressTitle.setText(name);
+
+         // show account type icon next to the name
+         Drawable drawableForAccount = Utils.getDrawableForAccount(_mbwManager.getSelectedAccount(), true, getResources());
+         if (drawableForAccount == null) {
+            ivAccountType.setVisibility(View.GONE);
+         } else {
+            ivAccountType.setImageDrawable(drawableForAccount);
+            ivAccountType.setVisibility(View.VISIBLE);
+         }
       }
 
-      // Set address
-      String[] addressStrings = Utils.stringChopper(address.toString(), 12);
-      ((TextView) _root.findViewById(R.id.tvAddress1)).setText(addressStrings[0]);
-      ((TextView) _root.findViewById(R.id.tvAddress2)).setText(addressStrings[1]);
-      ((TextView) _root.findViewById(R.id.tvAddress3)).setText(addressStrings[2]);
    }
 
-   private String getUri() {
-      return "bitcoin:" + getRecord().address.toString();
+   public Optional<Address> getAddress() {
+      return _mbwManager.getSelectedAccount().getReceivingAddress();
    }
 
    private class QrClickListener implements OnClickListener {
       @Override
       public void onClick(View v) {
-         ReceiveCoinsActivity.callMe(AddressFragment.this.getActivity(), getRecord());
+         Optional<Address> receivingAddress = _mbwManager.getSelectedAccount().getReceivingAddress();
+         if (receivingAddress.isPresent()) {
+            ReceiveCoinsActivity.callMe(AddressFragment.this.getActivity(),
+                  receivingAddress.get(), _mbwManager.getSelectedAccount().canSpend());
+         }
       }
    }
 
    /**
-    * Fires when record set changed
+    * We got a new Receiving Address, either because the selected Account changed,
+    * or because our HD Account received Coins and changed the Address
     */
    @Subscribe
-   public void recordSetChanged(RecordSetChanged event) {
+   public void receivingAddressChanged(ReceivingAddressChanged event) {
       updateUi();
    }
 
-   /**
-    * Fires when the selected record changes
-    */
    @Subscribe
-   public void selectedRecordChanged(SelectedRecordChanged event) {
+   public void accountChanged(AccountChanged event) {
       updateUi();
    }
 
-   /**
-    * Fires when the address book changed
-    */
    @Subscribe
-   public void addressBookChanged(AddressBookChanged event) {
+   public void balanceChanged(BalanceChanged event) {
       updateUi();
    }
+
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -35,11 +35,4 @@
 package com.mycelium.wallet.event;
 
 public class SyncStarted {
-
-   public final String process;
-
-   public SyncStarted(String process) {
-
-      this.process = process;
-   }
 }

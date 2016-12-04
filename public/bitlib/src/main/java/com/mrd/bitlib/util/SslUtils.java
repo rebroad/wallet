@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,9 +43,10 @@ public class SslUtils {
 
    private static final Map<String, SSLSocketFactory> _sslSocketFactories = new HashMap<String, SSLSocketFactory>();
 
-   private static final HostnameVerifier HOST_NAME_VERIFIER;
+   public static final HostnameVerifier HOST_NAME_VERIFIER_ACCEPT_ALL;
+   public static final  SSLSocketFactory SSL_SOCKET_FACTORY_ACCEPT_ALL;
 
-   private static synchronized SSLSocketFactory getSsLSocketFactory(String certificateThumbprint) {
+   public static synchronized SSLSocketFactory getSsLSocketFactory(String certificateThumbprint) {
       SSLSocketFactory factory = _sslSocketFactories.get(certificateThumbprint);
       if (factory == null) {
          factory = createSslSocketFactory(certificateThumbprint);
@@ -99,13 +100,35 @@ public class SslUtils {
 
       // Used for disabling host name verification. This is safe because we
       // trust the MWAPI server certificate explicitly
-      HOST_NAME_VERIFIER = new HostnameVerifier() {
+      HOST_NAME_VERIFIER_ACCEPT_ALL = new HostnameVerifier() {
          @Override
          public boolean verify(String hostname, SSLSession session) {
             return true;
          }
       };
 
+      //not used for our servers - sometimes needed after user confirmed to contact external services besides cert errors
+      TrustManager[] trustOneCert = new TrustManager[] { new X509TrustManager() {
+         public X509Certificate[] getAcceptedIssuers() {
+            return null;
+         }
+         public void checkClientTrusted(X509Certificate[] certs, String authType) {
+            //everything is fine
+         }
+         public void checkServerTrusted(X509Certificate[] certs, String authType) {
+            //everything is fine
+         }
+      } };
+
+      try {
+         SSLContext sc = SSLContext.getInstance("TLS");
+         sc.init(null, trustOneCert, null);
+         SSL_SOCKET_FACTORY_ACCEPT_ALL = sc.getSocketFactory();
+      } catch (NoSuchAlgorithmException e) {
+         throw new RuntimeException(e);
+      } catch (KeyManagementException e) {
+         throw new RuntimeException(e);
+      }
    }
 
    /**
@@ -125,8 +148,8 @@ public class SslUtils {
 
       HttpsURLConnection httpsUrlConnection = (HttpsURLConnection) connection;
 
-      if (httpsUrlConnection.getHostnameVerifier() != HOST_NAME_VERIFIER) {
-         httpsUrlConnection.setHostnameVerifier(HOST_NAME_VERIFIER);
+      if (httpsUrlConnection.getHostnameVerifier() != HOST_NAME_VERIFIER_ACCEPT_ALL) {
+         httpsUrlConnection.setHostnameVerifier(HOST_NAME_VERIFIER_ACCEPT_ALL);
       }
       SSLSocketFactory sslSocketFactory = getSsLSocketFactory(serverThumbprint);
       if (httpsUrlConnection.getSSLSocketFactory() != sslSocketFactory) {

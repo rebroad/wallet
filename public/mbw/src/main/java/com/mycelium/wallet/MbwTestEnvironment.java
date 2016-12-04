@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,70 +34,73 @@
 
 package com.mycelium.wallet;
 
-import android.util.Log;
-
 import com.mrd.bitlib.model.NetworkParameters;
-import com.mrd.mbwapi.api.MyceliumWalletApi;
-import com.mrd.mbwapi.impl.MyceliumWalletApiImpl;
-import com.mycelium.lt.api.LtApi;
-import com.mycelium.lt.api.LtApiClient;
-import com.mycelium.lt.api.LtApiClient.Logger;
+import com.mycelium.net.*;
+import com.mycelium.wallet.activity.util.BlockExplorer;
+import java.util.List;
+import java.util.ArrayList;
 
 public class MbwTestEnvironment extends MbwEnvironment {
 
-   private static final String myceliumThumbprint = "E5:70:76:B2:67:3A:89:44:7A:48:14:81:DF:BD:A0:58:C8:82:72:4F";
+   public static final String myceliumThumbprint = "E5:70:76:B2:67:3A:89:44:7A:48:14:81:DF:BD:A0:58:C8:82:72:4F";
 
-   private static final MyceliumWalletApiImpl.HttpsEndpoint httpsTestnetEndpoint = new MyceliumWalletApiImpl.HttpsEndpoint(
-         "https://node3.mycelium.com/mwstestnet", myceliumThumbprint);
 
-//   private static final MyceliumWalletApiImpl.HttpEndpoint httpsTestnetEndpoint = new MyceliumWalletApiImpl.HttpEndpoint(
-//         "http://192.168.1.139:8086");
 
-   /**
-    * The set of endpoints we use for testnet. The wallet chooses a random
-    * endpoint and if it does not respond it round-robins through the list. This
-    * way we achieve client side load-balancing and fail-over.
-    */
-   private static final MyceliumWalletApiImpl.HttpEndpoint[] testnetServerEndpoints = new MyceliumWalletApiImpl.HttpEndpoint[] { httpsTestnetEndpoint };
-   private static final MyceliumWalletApiImpl testnetApi = new MyceliumWalletApiImpl(testnetServerEndpoints,
-         NetworkParameters.testNetwork);
 
-   /**
-    * Local Trader API for testnet
-    */
-//   private static final LtApiClient.HttpEndpoint testnetLocalTraderEndpoint = new LtApiClient.HttpEndpoint(
-//         "http://192.168.1.139:8089/trade/");
-
-   private static final LtApiClient.HttpsEndpoint testnetLocalTraderEndpoint = new LtApiClient.HttpsEndpoint(
-         "https://node3.mycelium.com/lttestnet/", myceliumThumbprint);
-
-   private static final LtApiClient testnetLocalTraderApi = new LtApiClient(testnetLocalTraderEndpoint, new Logger() {
-
-      @Override
-      public void logError(String message, Exception e) {
-         Log.e("", message, e);
-
-      }
-
-      @Override
-      public void logError(String message) {
-         Log.e("", message);
-
-      }
-   });
+   public MbwTestEnvironment(String brand){
+      super(brand);
+   }
 
    @Override
    public NetworkParameters getNetwork() {
       return NetworkParameters.testNetwork;
    }
 
-   @Override
-   public MyceliumWalletApi getMwsApi() {
-      return testnetApi;
-   }
+
+   /**
+    * Local Trader API for testnet
+    */
+   private static final ServerEndpoints testnetLtEndpoints = new ServerEndpoints(new HttpEndpoint[]{
+         new HttpsEndpoint("https://node3.mycelium.com/lttestnet", myceliumThumbprint),
+         new TorHttpsEndpoint("https://grrhi6bwwpiarsfl.onion/lttestnet", myceliumThumbprint)
+   });
 
    @Override
-   public LtApi getLocalTraderApi() {
-      return testnetLocalTraderApi;
+   public ServerEndpoints getLtEndpoints() {
+      return  testnetLtEndpoints;
+   }
+
+
+   /**
+    * Wapi
+    */
+   private static final ServerEndpoints testnetWapiEndpoints = new ServerEndpoints(new HttpEndpoint[]{
+      new HttpsEndpoint("https://node3.mycelium.com/wapitestnet", myceliumThumbprint),
+      new TorHttpsEndpoint("https://ti4v3ipng2pqutby.onion/wapitestnet", myceliumThumbprint)
+   });
+
+   @Override
+   public ServerEndpoints getWapiEndpoints() {
+      return  testnetWapiEndpoints;
+   }
+
+   /**
+    * Available BlockExplorers
+    *
+    * The first is the default block explorer if the requested one is not available
+    */
+   private static final List<BlockExplorer> testnetExplorerClearEndpoints = new ArrayList<BlockExplorer>() {{
+      add(new BlockExplorer("BKR","blockr", "http://tbtc.blockr.io/address/info/", "http://tbtc.blockr.io/tx/info/", "http://tbtc.blockr.io/address/info/", "http://tbtc.blockr.io/tx/info/"));
+      add(new BlockExplorer("SBT","smartbit", "https://www.sandbox.smartbit.com.au/address/", "https://sandbox.smartbit.com.au/tx/", null, null));
+      add(new BlockExplorer("BTL","blockTrail", "https://www.blocktrail.com/tBTC/address/", "https://www.blocktrail.com/tBTC/tx/", null, null));
+      add(new BlockExplorer("BPY","BitPay", "https://test-insight.bitpay.com/address/", "https://test-insight.bitpay.com/tx/", null, null));
+      add(new BlockExplorer("BEX","blockExplorer", "http://blockexplorer.com/testnet/address/", "https://blockexplorer.com/testnet/tx/", null, null));
+      add(new BlockExplorer("BCY","blockCypher", "https://live.blockcypher.com/btc-testnet/address/", "https://live.blockcypher.com/btc-testnet/tx/", null, null));
+      add(new BlockExplorer("BES","bitEasy", "https://www.biteasy.com/testnet/addresses/", "https://www.biteasy.com/testnet/transactions/", null, null));
+      add(new BlockExplorer("CPM","coinprism", "https://testnet.coinprism.info/address/", "https://testnet.coinprism.info/tx/", null, null));
+   }};
+
+   public List<BlockExplorer> getBlockExplorerList() {
+      return new ArrayList<BlockExplorer>(testnetExplorerClearEndpoints);
    }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -39,26 +39,33 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
+import android.support.v4.app.FragmentTransaction;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
 import com.google.common.base.Preconditions;
+import com.mycelium.net.ServerEndpointType;
+import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
+import com.mycelium.wallet.event.TorStateChanged;
+import com.squareup.otto.Subscribe;
 
 public class BalanceMasterFragment extends Fragment {
+   private  TextView tvTor;
 
    @Override
    public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
       setHasOptionsMenu(true);
-      return Preconditions.checkNotNull(inflater.inflate(R.layout.balance_master_fragment, container, false));
-   }
-
-   @Override
-   public void onAttach(Activity activity) {
-
-      super.onAttach(activity);
+      View view = Preconditions.checkNotNull(inflater.inflate(R.layout.balance_master_fragment, container, false));
+      FragmentTransaction fragmentTransaction = getFragmentManager().beginTransaction();
+      fragmentTransaction.replace(R.id.phFragmentAddress, new AddressFragment());
+      fragmentTransaction.replace(R.id.phFragmentBalance, new BalanceFragment());
+      fragmentTransaction.replace(R.id.phFragmentNotice, new NoticeFragment());
+      fragmentTransaction.replace(R.id.phFragmentGlidera, new BuySellFragment());
+      fragmentTransaction.commitAllowingStateLoss();
+      return view;
    }
 
    @Override
@@ -79,6 +86,40 @@ public class BalanceMasterFragment extends Fragment {
          // Ignore
          //todo insert uncaught error handler
       }
+
+      MbwManager mbwManager = MbwManager.getInstance(activity);
+      tvTor = (TextView) activity.findViewById(R.id.tvTorState);
+      if (mbwManager.getTorMode() == ServerEndpointType.Types.ONLY_TOR && mbwManager.getTorManager() != null) {
+         tvTor.setVisibility(View.VISIBLE);
+         showTorState(mbwManager.getTorManager().getInitState());
+      }else{
+         tvTor.setVisibility(View.GONE);
+      }
+
+      MbwManager.getInstance(this.getActivity()).getEventBus().register(this);
       super.onResume();
    }
+
+   @Override
+   public void onPause() {
+      MbwManager.getInstance(this.getActivity()).getEventBus().unregister(this);
+      super.onPause();
+   }
+
+   @Subscribe
+   public void onTorState(TorStateChanged torState){
+      showTorState(torState.percentage);
+   }
+
+   private void showTorState(int percentage) {
+      if (percentage==0) {
+         tvTor.setText("");
+      } else if (percentage==100){
+         tvTor.setText("");
+      } else {
+         tvTor.setText(getString(R.string.tor_state_init));
+      }
+   }
+
+
 }

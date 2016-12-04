@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -51,21 +51,16 @@ import android.view.View.OnClickListener;
 import android.widget.TextView;
 
 import com.google.common.base.Charsets;
-import com.google.common.io.CharStreams;
-import com.google.common.io.InputSupplier;
-import com.mrd.bitlib.model.Address;
-import com.mrd.bitlib.model.NetworkParameters;
-import com.mrd.mbwapi.api.ApiError;
-import com.mrd.mbwapi.api.WalletVersionResponse;
-import com.mycelium.wallet.Constants;
-import com.mycelium.wallet.MbwManager;
-import com.mycelium.wallet.R;
-import com.mycelium.wallet.Utils;
-import com.mycelium.wallet.VersionManager;
-import com.mycelium.wallet.Wallet;
+import com.google.common.base.Joiner;
+import com.google.common.io.ByteSource;
+import com.mycelium.wallet.*;
+import com.mycelium.wallet.activity.modern.DarkThemeChangeLog;
 import com.mycelium.wallet.activity.modern.Toaster;
-import com.mycelium.wallet.activity.send.SendInitializationActivity;
+import com.mycelium.wallet.activity.util.QrImageView;
 import com.mycelium.wallet.api.AbstractCallbackHandler;
+import com.mycelium.wapi.api.WapiException;
+import com.mycelium.wapi.api.response.VersionInfoExResponse;
+import de.cketti.library.changelog.ChangeLog;
 
 public class AboutActivity extends Activity {
    @Override
@@ -77,23 +72,35 @@ public class AboutActivity extends Activity {
       final MbwManager mbwManager = MbwManager.getInstance(this);
       final VersionManager versionManager = mbwManager.getVersionManager();
       String version = versionManager.getVersion();
+      int versionCode = versionManager.getVersionCode();
       ((TextView) findViewById(R.id.tvVersionNumber)).setText(version);
+      ((TextView) findViewById(R.id.tvVersionCode)).setText(String.format("(%d)", versionCode));
+      findViewById(R.id.bt_tou_mycelium).setOnClickListener(new ShowLicenseListener(R.raw.tou_mycelium));
       findViewById(R.id.bt_license_mycelium).setOnClickListener(new ShowLicenseListener(R.raw.license_mycelium));
       findViewById(R.id.bt_license_zxing).setOnClickListener(new ShowLicenseListener(R.raw.license_zxing));
       findViewById(R.id.bt_license_pdfwriter).setOnClickListener(new ShowLicenseListener(R.raw.license_pdfwriter));
+      findViewById(R.id.bt_special_thanks).setOnClickListener(new ShowLicenseListener(R.raw.special_thanks));
+
+      findViewById(R.id.bt_show_changelog).setOnClickListener(new OnClickListener() {
+         @Override
+         public void onClick(View view) {
+            ChangeLog cl = new DarkThemeChangeLog(AboutActivity.this);
+            cl.getFullLogDialog().show();
+         }
+      });
 
       findViewById(R.id.bt_check_update).setOnClickListener(new View.OnClickListener() {
          @Override
          public void onClick(View v) {
             final ProgressDialog progress = ProgressDialog.show(AboutActivity.this, getString(R.string.update_check),
                   getString(R.string.please_wait), true);
-            versionManager.forceCheckForUpdate(new AbstractCallbackHandler<WalletVersionResponse>() {
+            versionManager.checkForUpdateSync(new AbstractCallbackHandler<VersionInfoExResponse>() {
                @Override
-               public void handleCallback(WalletVersionResponse response, ApiError exception) {
+               public void handleCallback(VersionInfoExResponse response, WapiException exception) {
                   progress.dismiss();
                   if (exception != null) {
                      new Toaster(AboutActivity.this).toast(R.string.version_check_failed, false);
-                     mbwManager.reportIgnoredException(new RuntimeException(exception.errorMessage));
+                     mbwManager.reportIgnoredException(new RuntimeException("WapiException: " + String.valueOf(exception.errorCode)));
                   } else {
                      showVersionInfo(versionManager, response);
                   }
@@ -102,35 +109,52 @@ public class AboutActivity extends Activity {
          }
       });
 
-      findViewById(R.id.btDonate).setOnClickListener(donateClickListener);
+      findViewById(R.id.bt_show_server_info).setOnClickListener(new OnClickListener() {
+         @Override
+         public void onClick(View view) {
+            ConnectionLogsActivity.callMe(AboutActivity.this);
+         }
+      });
 
       setLinkTo((TextView) findViewById(R.id.tvSourceUrl), R.string.source_url);
       setLinkTo((TextView) findViewById(R.id.tvHomepageUrl), R.string.homepage_url);
 
       setMailTo((TextView) findViewById(R.id.tvContactEmail), R.string.contact_email);
+
+      //set playstore link to qr code
+      String packageName = getApplicationContext().getPackageName();
+      final String playstoreUrl = Constants.PLAYSTORE_BASE_URL + packageName;
+      QrImageView playstoreQr = (QrImageView) findViewById(R.id.ivPlaystoreQR);
+      playstoreQr.setQrCode(playstoreUrl);
+      playstoreQr.setTapToCycleBrightness(false);
+      playstoreQr.setOnClickListener(new OnClickListener() {
+         @Override
+         public void onClick(View v) {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse(playstoreUrl));
+            startActivity(intent);
+         }
+      });
+
+
+      // show direct apk link for the - very unlikely - case that google blocks our playstore entry
+      QrImageView directApkQr = (QrImageView) findViewById(R.id.ivDirectApkQR);
+      directApkQr.setQrCode(Constants.DIRECT_APK_URL);
+      directApkQr.setTapToCycleBrightness(false);
+      directApkQr.setOnClickListener(new OnClickListener() {
+         @Override
+         public void onClick(View v) {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse(Constants.DIRECT_APK_URL));
+            startActivity(intent);
+         }
+      });
+
    }
 
-   OnClickListener donateClickListener = new OnClickListener() {
-
-      @Override
-      public void onClick(View v) {
-         Utils.showSimpleMessageDialog(AboutActivity.this, R.string.donate_description, new Runnable() {
-            
-            @Override
-            public void run() {
-               MbwManager mbwManager = MbwManager.getInstance(AboutActivity.this);
-               NetworkParameters network = mbwManager.getNetwork();
-               Address address = network.isProdnet() ? Address.fromString(Constants.PRODNET_DONATION_ADDRESS) :Address.fromString(Constants.TESTNET_DONATION_ADDRESS);
-               Wallet wallet = mbwManager.getRecordManager().getWallet(mbwManager.getWalletMode());
-               SendInitializationActivity.callMe(AboutActivity.this, wallet, null, address, false);
-            }
-         });
-      }
-   };
-
-   private void showVersionInfo(VersionManager versionManager, WalletVersionResponse response) {
-      if (versionManager.isSameVersion(response.versionNumber)) {
-         new AlertDialog.Builder(this).setMessage(getString(R.string.version_uptodate, response.versionNumber))
+   private void showVersionInfo(VersionManager versionManager, VersionInfoExResponse response) {
+      if (response==null || versionManager.isSameVersion(response.versionNumber)) {
+         new AlertDialog.Builder(this).setMessage(getString(R.string.version_uptodate, versionManager.getVersion()))
                .setTitle(getString(R.string.update_check))
                .setNeutralButton(R.string.ok, new DialogInterface.OnClickListener() {
                   @Override
@@ -170,13 +194,13 @@ public class AboutActivity extends Activity {
       public void onClick(View v) {
          final String message;
          try {
-            message = CharStreams.toString(CharStreams.newReaderSupplier(new InputSupplier<InputStream>() {
-               @Override
-               public InputStream getInput() throws IOException {
-
-                  return getResources().openRawResource(resourceId);
-               }
-            }, Charsets.UTF_8));
+            message = Joiner.on("\n").join(
+                  (new ByteSource() {
+                     @Override
+                     public InputStream openStream() throws IOException {
+                        return getResources().openRawResource(resourceId);
+                     }
+                  }).asCharSource(Charsets.UTF_8).readLines());
          } catch (IOException e) {
             throw new RuntimeException(e);
          }

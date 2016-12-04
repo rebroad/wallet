@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -36,16 +36,16 @@ package com.mycelium.wallet.event;
 
 import com.google.common.base.Optional;
 
-import com.mrd.mbwapi.api.WalletVersionResponse;
+import com.mycelium.wapi.api.response.VersionInfoResponse;
 
 public class WalletVersionEvent {
-   public final Optional<WalletVersionResponse> response;
+   public final Optional<VersionInfoResponse> response;
 
    public WalletVersionEvent() {
       response = Optional.absent();
    }
 
-   public WalletVersionEvent(WalletVersionResponse response) {
+   public WalletVersionEvent(VersionInfoResponse response) {
       this.response = Optional.of(response);
    }
 }

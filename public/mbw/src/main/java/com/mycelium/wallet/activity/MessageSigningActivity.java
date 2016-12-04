@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -42,18 +42,24 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
-
 import com.mrd.bitlib.crypto.InMemoryPrivateKey;
 import com.mrd.bitlib.crypto.SignedMessage;
 import com.mrd.bitlib.model.Address;
 import com.mrd.bitlib.model.NetworkParameters;
-import com.mycelium.wallet.AndroidRandomSource;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
-import com.mycelium.wallet.Record;
 import com.mycelium.wallet.Utils;
 import com.mycelium.wallet.activity.modern.Toaster;
+import com.mycelium.wapi.wallet.AesKeyCipher;
+import com.mycelium.wapi.wallet.KeyCipher;
+import com.mycelium.wapi.wallet.single.SingleAddressAccount;
 
+/*
+todo HD: root seeds will for now not support signing directly. only support single addresses.
+
+todo HD: instead, there can be two possibilities. select address for signing from transaction, or selecting an address from a huge list. this sucks, so lets discuss it further.
+
+*/
 public class MessageSigningActivity extends Activity {
 
 
@@ -71,12 +77,22 @@ public class MessageSigningActivity extends Activity {
            /**/"%s\n" +
            /**/"-----END BITCOIN SIGNATURE-----";
 
-    public static void callMe(Context currentActivity, Record selectedRecord) {
-        Intent intent = new Intent(currentActivity, MessageSigningActivity.class);
-        String privKey = selectedRecord.key.getBase58EncodedPrivateKey(MbwManager.getInstance(currentActivity).getNetwork());
-        intent.putExtra(PRIVATE_KEY, privKey);
-        currentActivity.startActivity(intent);
+    public static void callMe(Context currentActivity, SingleAddressAccount account) {
+       InMemoryPrivateKey privateKey;
+       try {
+          privateKey = account.getPrivateKey(AesKeyCipher.defaultKeyCipher());
+       } catch (KeyCipher.InvalidKeyCipher e) {
+          throw new RuntimeException(e);
+       }
+       callMe(currentActivity, privateKey);
     }
+
+   public static void callMe(Context currentActivity, InMemoryPrivateKey key) {
+      Intent intent = new Intent(currentActivity, MessageSigningActivity.class);
+      String privKey = key.getBase58EncodedPrivateKey(MbwManager.getInstance(currentActivity).getNetwork());
+      intent.putExtra(PRIVATE_KEY, privKey);
+      currentActivity.startActivity(intent);
+   }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -112,7 +128,7 @@ public class MessageSigningActivity extends Activity {
                     @Override
                     public void run() {
                         messageText = messageToSign.getText().toString();
-                        SignedMessage signedMessage = privateKey.signMessage(messageText, new AndroidRandomSource());
+                        SignedMessage signedMessage = privateKey.signMessage(messageText);
                         base64Signature = signedMessage.getBase64Signature();
                         runOnUiThread(new Runnable() {
                             @Override

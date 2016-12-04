@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -51,19 +51,15 @@ public class CreateTrader1Activity extends Activity {
       currentActivity.startActivityForResult(intent, requestCode);
    }
 
-   private Button _btAccept;
-   private Button _btDecline;
-   private TextView _tvDescription;
-
    /** Called when the activity is first created. */
    @Override
    public void onCreate(Bundle savedInstanceState) {
       super.onCreate(savedInstanceState);
       setContentView(R.layout.lt_create_trader_1_activity);
 
-      _tvDescription = (TextView) findViewById(R.id.tvDescription);
-      _btAccept = (Button) findViewById(R.id.btAccept);
-      _btDecline = (Button) findViewById(R.id.btDecline);
+      TextView _tvDescription = (TextView) findViewById(R.id.tvDescription);
+      Button _btAccept = (Button) findViewById(R.id.btAccept);
+      Button _btDecline = (Button) findViewById(R.id.btDecline);
 
       _tvDescription.setText(
             getString(R.string.lt_tos_1)

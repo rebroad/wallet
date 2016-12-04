@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -39,32 +39,26 @@ import android.content.Context;
 import android.os.Build;
 import android.util.Log;
 
-import com.mrd.mbwapi.api.ApiException;
-import com.mrd.mbwapi.api.ErrorMetaData;
-import com.mrd.mbwapi.api.MyceliumWalletApi;
+import com.mycelium.wapi.api.WapiClient;
+import com.mycelium.wapi.api.lib.ErrorMetaData;
+import com.mycelium.wapi.api.Wapi;
+import com.mycelium.wapi.api.request.ErrorCollectorRequest;
 
 public class HttpErrorCollector implements Thread.UncaughtExceptionHandler {
 
    private final Thread.UncaughtExceptionHandler orig;
-   private final MyceliumWalletApi api;
+   private final Wapi api;
    private final String version;
    private final ErrorMetaData metaData;
 
-   public HttpErrorCollector(Thread.UncaughtExceptionHandler orig, MyceliumWalletApi api, String version, ErrorMetaData metaData) {
+   public HttpErrorCollector(Thread.UncaughtExceptionHandler orig, Wapi api, String version, ErrorMetaData metaData) {
       this.orig = orig;
       this.api = api;
       this.version = version;
       this.metaData = metaData;
    }
 
-   //todo make sure proxy is set before this. require as dependency?
-   public static HttpErrorCollector registerInVM(Context applicationContext) {
-      MbwEnvironment env = MbwEnvironment.determineEnvironment(applicationContext);
-      String version = VersionManager.determineVersion(applicationContext);
-      return registerInVM(applicationContext, version, env.getMwsApi());
-   }
-
-   public static HttpErrorCollector registerInVM(Context applicationContext, String version, MyceliumWalletApi api) {
+   public static HttpErrorCollector registerInVM(Context applicationContext, WapiClient wapi) {
       // Initialize error collector
       boolean emailOnErrors = applicationContext.getResources().getBoolean(R.bool.email_on_errors);
       if (!emailOnErrors) {
@@ -74,8 +68,9 @@ public class HttpErrorCollector implements Thread.UncaughtExceptionHandler {
       if ((orig instanceof HttpErrorCollector)) {
          return (HttpErrorCollector) orig;
       }
+      String version = VersionManager.determineVersion(applicationContext) + " / " + VersionManager.determineVersionCode(applicationContext);
       Log.i(Constants.TAG, "registering exception handler from thread " + Thread.currentThread().getName());
-      HttpErrorCollector ret = new HttpErrorCollector(orig, api, version, buildMetaData(applicationContext));
+      HttpErrorCollector ret = new HttpErrorCollector(orig, wapi, version, buildMetaData(applicationContext));
       Thread.setDefaultUncaughtExceptionHandler(ret);
       return ret;
 
@@ -108,10 +103,8 @@ public class HttpErrorCollector implements Thread.UncaughtExceptionHandler {
          @Override
          public void run() {
             try {
-               api.collectError(throwable, version, metaData);
+               api.collectError(new ErrorCollectorRequest(throwable, version, metaData));
             } catch (RuntimeException e) {
-               Log.e(Constants.TAG, "error while sending error", e);
-            } catch (ApiException e) {
                Log.e(Constants.TAG, "error while sending error", e);
             } finally {
                Log.e(Constants.TAG, "uncaught exception", throwable);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ public final class Bitcoins implements Serializable {
 
    public static final long SATOSHIS_PER_BITCOIN = 100000000L;
    private static final BigDecimal SATOSHIS_PER_BITCOIN_BD = BigDecimal.valueOf(SATOSHIS_PER_BITCOIN);
-   private static final long MAX_VALUE = 21000000 * SATOSHIS_PER_BITCOIN;
+   public static final long MAX_VALUE = 21000000 * SATOSHIS_PER_BITCOIN;
    // public static final String BITCOIN_SYMBOL = "\u0243"; // Ƀ
    // public static final String BITCOIN_SYMBOL = "\u0E3F"; // ฿
    public static final String BITCOIN_SYMBOL = "BTC"; // BTC
@@ -123,9 +123,9 @@ public final class Bitcoins implements Serializable {
       return toBigDecimal().multiply(BigDecimal.valueOf(satoshis));
    }
 
-    protected Bitcoins parse(String input) {
-        return Bitcoins.valueOf(input);
-    }
+   protected Bitcoins parse(String input) {
+      return Bitcoins.valueOf(input);
+   }
 
    @Override
    public String toString() {
@@ -175,11 +175,11 @@ public final class Bitcoins implements Serializable {
    }
 
    public String toCurrencyString() {
-      return new StringBuilder().append(BITCOIN_SYMBOL).append(' ').append(toString()).toString();
+      return BITCOIN_SYMBOL + ' ' + toString();
    }
 
    public String toCurrencyString(int decimals) {
-      return new StringBuilder().append(BITCOIN_SYMBOL).append(' ').append(toString(decimals)).toString();
+      return BITCOIN_SYMBOL + ' ' + toString(decimals);
    }
 
    public Bitcoins roundToSignificantFigures(int n) {
@@ -197,8 +197,7 @@ public final class Bitcoins implements Serializable {
 
       final double magnitude = Math.pow(10, power);
       final long shifted = Math.round(num * magnitude);
-      long ret = (long) (shifted / magnitude);
-      return ret;
+      return (long) (shifted / magnitude);
    }
 
 }

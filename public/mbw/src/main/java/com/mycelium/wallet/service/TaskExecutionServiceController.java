@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -56,6 +56,7 @@ public class TaskExecutionServiceController {
       public void onResultReceived(ServiceTask<?> result);
    }
 
+   @SuppressLint("HandlerLeak")
    private class MyServiceConnection extends Handler implements ServiceConnection {
       private Messenger _serviceMessenger;
       private Messenger _myMessenger;
@@ -180,6 +181,7 @@ public class TaskExecutionServiceController {
       return _error;
    }
 
+   @SuppressLint("InlinedApi")
    public void bind(Activity activity, TaskExecutionServiceCallback callbackHandler) {
       _connection = new MyServiceConnection();
       _callbackHandler = callbackHandler;

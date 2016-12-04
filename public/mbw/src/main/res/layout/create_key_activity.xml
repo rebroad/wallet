@@ -32,7 +32,7 @@
             android:layout_weight="1" >
         </View>
 
-        <TextView
+        <com.mycelium.wallet.activity.util.AddressLabel
             android:id="@+id/tvAddress"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -90,7 +90,7 @@
 
             android:paddingLeft="10dp"
             android:paddingRight="10dp"
-            android:text="@string/use" />
+            android:text="@string/use_button" />
 
         <View
             android:layout_width="0dp"

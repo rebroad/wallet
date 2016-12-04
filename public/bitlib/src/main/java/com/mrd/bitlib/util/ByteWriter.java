@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@
 package com.mrd.bitlib.util;
 
 import com.mrd.bitlib.model.CompactInt;
+
+import java.io.UnsupportedEncodingException;
 
 final public class ByteWriter {
 
@@ -128,6 +130,15 @@ final public class ByteWriter {
       byte[] bytes = s.getBytes();
       putIntLE(bytes.length);
       putBytes(bytes);
+   }
+
+   public void putRawStringUtf8(String s) {
+      try {
+         byte[] bytes = s.getBytes("UTF-8");
+         putBytes(bytes);
+      } catch (UnsupportedEncodingException e) {
+         throw new RuntimeException(e);
+      }
    }
 
    public byte[] toBytes() {

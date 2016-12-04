@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -39,7 +39,7 @@ public class ServiceTaskStatusEx extends ServiceTaskStatus {
 
    public enum State {
       NOTRUNNING, STARTING, RUNNING, FINISHED
-   };
+   }
 
    public State state;
 

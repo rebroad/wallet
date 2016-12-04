@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -35,36 +35,35 @@
 package com.mycelium.wallet;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
 import android.content.Context;
 
-import com.mycelium.wallet.event.AddressBookChanged;
-import com.squareup.otto.Bus;
+import android.graphics.drawable.Drawable;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.mrd.bitlib.model.Address;
 
 public class AddressBookManager {
    private static final String ADDRESS_BOOK_FILE_NAME = "address-book.txt";
 
    public static class Entry implements Comparable<Entry> {
-      private String _address;
+      private Address _address;
       private String _name;
 
-      public Entry(String address, String name) {
+      public Entry(Address address, String name) {
          _address = address;
          _name = name == null ? "" : name;
       }
 
-      public String getAddress() {
+      public Address getAddress() {
          return _address;
       }
 
@@ -93,72 +92,35 @@ public class AddressBookManager {
 
    }
 
-   private Context _applicationContext;
-   private final Bus _eventBus;
-   private List<Entry> _entries;
-   private Map<String, Entry> _addressMap;
+   public static class IconEntry extends Entry{
+      private Drawable _icon;
 
-   public AddressBookManager(Context context, Bus eventBus) {
-      _eventBus = eventBus;
-      _applicationContext = context.getApplicationContext();
-      List<Entry> entries = loadEntries(_applicationContext);
-      _entries = new ArrayList<Entry>(entries.size());
-      _addressMap = new HashMap<String, Entry>(entries.size());
+      public IconEntry(Address address, String name, Drawable icon) {
+         super(address, name);
+         this._icon = icon;
+      }
+
+      public Drawable getIcon() {
+         return _icon;
+      }
+   }
+
+   private List<Entry> _entries;
+   private Map<Address, Entry> _addressMap;
+
+   public AddressBookManager(Context context) {
+      Context applicationContext = context.getApplicationContext();
+      List<Entry> entries = loadEntries(applicationContext);
+      _entries = Lists.newArrayList();
+      _addressMap = Maps.newHashMap();
       for (Entry entry : entries) {
          insertOrUpdateEntryInt(entry.getAddress(), entry.getName());
       }
       Collections.sort(_entries);
    }
 
-   // @formatter:off
-   // Inserts, updates or deletes an entry.
-   // If the specified name is empty and an entry exists for the specified
-   // address, then the entry is deleted.
-   // If an entry for the specified address exists and the name is not empty,
-   // then the entry is updated with the new name.
-   // If an entry for the specified address does not exists and the name is not
-   // empty, then the a new entry is created.
-   // No attempt is made at making names unique
-   // @formatter:on
-   public synchronized void insertUpdateOrDeleteEntry(String address, String name) {
-      if (address == null || name == null) {
-         return;
-      }
-      name = name.trim();
-      if (name.length() == 0) {
-         deleteEntry(address);
-      } else {
-         insertOrUpdateEntryInt(address, name);
-      }
-      Collections.sort(_entries);
-      save();
-   }
-
-   public synchronized void deleteEntry(String address) {
-      if (address == null) {
-         return;
-      }
-      address = address.trim();
-      Entry entry = _addressMap.get(address);
-      if (entry == null) {
-         return;
-      }
-      _entries.remove(entry);
-      _addressMap.remove(address);
-      save();
-   }
-
-   private void insertOrUpdateEntryInt(String address, String name) {
-      if (address == null) {
-         return;
-      }
-      address = address.trim();
-      if (address.length() == 0) {
-         return;
-      }
-      if (name == null) {
-         return;
-      }
+   private void insertOrUpdateEntryInt(Address address, String name) {
+      Preconditions.checkNotNull(address,name);
       name = name.trim();
       if (name.length() == 0) {
          // We don't want entries with blank names
@@ -177,66 +139,8 @@ public class AddressBookManager {
       _addressMap.put(address, entry);
    }
 
-   public String getAddressByName(String name) {
-      if (name == null) {
-         return null;
-      }
-      name = name.trim();
-      for (Entry entry : _entries) {
-         if (name.equalsIgnoreCase(entry.getName())) {
-            return entry.getAddress();
-         }
-      }
-      return null;
-   }
-
-   public boolean hasAddress(String address) {
-      if (address == null) {
-         return false;
-      }
-      return _addressMap.containsKey(address);
-   }
-
-   public String getNameByAddress(String address) { // todo migrate to
-                                                    // com.mrd.bitlib.model.Address
-      if (address == null) {
-         return null;
-      }
-      Entry entry = _addressMap.get(address.trim());
-      if (entry == null) {
-         return "";
-      }
-      return entry.getName();
-   }
-
    public List<Entry> getEntries() {
       return Collections.unmodifiableList(_entries);
-   }
-
-   public int numEntries() {
-      return _entries.size();
-   }
-
-   private void save() {
-      saveEntries(_entries, _applicationContext);
-      broadcasAddressBookChangedChanged();
-   }
-
-   private static void saveEntries(List<Entry> entries, Context applicationContext) {
-      try {
-         FileOutputStream out = applicationContext.openFileOutput(ADDRESS_BOOK_FILE_NAME, Context.MODE_PRIVATE);
-         BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(out));
-         for (Entry entry : entries) {
-            StringBuilder sb = new StringBuilder();
-            sb.append(encode(entry.getAddress())).append(',').append(encode(entry._name));
-            sb.append('\n');
-            writer.write(sb.toString());
-         }
-         writer.close();
-      } catch (Exception e) {
-         throw new RuntimeException(e);
-      }
-
    }
 
    private static List<Entry> loadEntries(Context applicationContext) {
@@ -257,15 +161,18 @@ public class AddressBookManager {
                break;
             }
             List<String> list = stringToValueList(line);
-            String address = null;
+            String addressString = null;
             if (list.size() > 0) {
-               address = decode(list.get(0));
+               addressString = decode(list.get(0));
             }
             String name = null;
             if (list.size() > 1) {
                name = decode(list.get(1));
             }
-            entries.add(new Entry(address, name));
+            Address address = Address.fromString(addressString);
+            if (address != null) {
+               entries.add(new Entry(address, name));
+            }
          }
          stream.close();
          return entries;
@@ -305,7 +212,6 @@ public class AddressBookManager {
     * @param startIndex
     *           the start index where the search starts
     * @return the resulting comma index or the length of the string
-    * @throws PersistenceException
     */
    private static int nextSeparator(String s, int startIndex) {
       boolean slash = false;
@@ -344,32 +250,6 @@ public class AddressBookManager {
       return s.length();
    }
 
-   private static String encode(String value) {
-      if (value == null) {
-         // Treat null string values as the empty string
-         value = "";
-      }
-      if (value.indexOf('/') == -1 && value.indexOf(',') == -1) {
-         return value;
-      }
-      StringBuilder sb = new StringBuilder(value.length() + 1);
-      char[] chars = value.toCharArray();
-      for (char c : chars) {
-         if (c == '/') {
-            sb.append("//");
-         } else if (c == ',') {
-            sb.append("/,");
-         } else if (c == '(') {
-            sb.append("/(");
-         } else if (c == ')') {
-            sb.append("/)");
-         } else {
-            sb.append(c);
-         }
-      }
-      return sb.toString();
-   }
-
    private static String decode(String value) {
       StringBuilder sb = new StringBuilder(value.length() + 1);
       char[] chars = value.toCharArray();
@@ -385,9 +265,10 @@ public class AddressBookManager {
                sb.append('(');
             } else if (c == ')') {
                sb.append(')');
-            } else {
-               // decode error, ignore this character
             }
+            // else {
+               // decode error, ignore this character
+            // }
          } else {
             if (c == '/') {
                slash = true;
@@ -398,9 +279,4 @@ public class AddressBookManager {
       }
       return sb.toString();
    }
-
-   private void broadcasAddressBookChangedChanged() {
-      _eventBus.post(new AddressBookChanged());
-   }
-
 }

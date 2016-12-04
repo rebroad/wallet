@@ -1,31 +1,27 @@
-apply plugin: 'java'
-apply plugin: 'fatjar'
-apply plugin: "application"
-
-def mainClass = 'com.mrd.bitlib.BackupUtil'
-
-mainClassName = mainClass
-
-
-repositories {
-    mavenCentral()
-}
-
 buildscript {
     repositories {
         mavenCentral()
     }
     dependencies {
-        classpath 'eu.appsatori:gradle-fatjar-plugin:0.2-rc1'
+        classpath 'org.batcha.gradle.plugins:git-dependencies:0.2'
     }
 }
 
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '1.2.3'
+    id 'application'
+}
 
+mainClassName='com.mrd.bitlib.BackupUtil'
+project.ext.set("mainClassName", mainClassName)
+
+repositories {
+    mavenCentral()
+}
 
 sourceCompatibility = 1.6
 targetCompatibility = 1.6
-
-
 
 dependencies {
     compile project(':public:bitlib')
@@ -33,12 +29,20 @@ dependencies {
     testCompile 'junit:junit:'+junitVersion
 }
 
-fatJar {
+jar {
     manifest {
-
         attributes(
-                "Main-Class": mainClass,
+                "Main-Class": project.mainClassName,
                 "Implementation-Version": version ?: 'dev'
         )
+    }
+}
+
+shadowJar {
+    mergeServiceFiles()
+    manifest {
+        attributes 'Timestamp': String.valueOf(System.currentTimeMillis())
+        attributes 'Implementation-Version': getCheckedOutGitCommitHash()
+        attributes 'Main-Class': project.mainClassName
     }
 }

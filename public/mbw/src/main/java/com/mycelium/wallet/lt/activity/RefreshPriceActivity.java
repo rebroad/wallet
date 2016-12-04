@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -225,13 +225,13 @@ public class RefreshPriceActivity extends Activity {
          Utils.toastConnectionError(RefreshPriceActivity.this);
          finish();
          return true;
-      };
+      }
 
       @Override
       public void onLtBtcSellPriceAssesed(BtcSellPrice btcSellPrice, AssessBtcSellPrice request) {
          _newBtcSellPrice = btcSellPrice;
          updateUi();
-      };
+      }
    };
 
 }

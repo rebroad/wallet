@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,6 @@
 
 package com.mrd.bitlib.crypto;
 
-import java.io.Serializable;
-import java.util.Arrays;
-
 import com.mrd.bitlib.crypto.ec.Parameters;
 import com.mrd.bitlib.crypto.ec.Point;
 import com.mrd.bitlib.model.Address;
@@ -27,6 +24,10 @@ import com.mrd.bitlib.util.ByteReader;
 import com.mrd.bitlib.util.HashUtils;
 import com.mrd.bitlib.util.HexUtils;
 import com.mrd.bitlib.util.Sha256Hash;
+
+import java.io.Serializable;
+import java.util.Arrays;
+
 
 public class PublicKey implements Serializable {
 
@@ -58,8 +59,12 @@ public class PublicKey implements Serializable {
 
    @Override
    public int hashCode() {
-      byte[] hash = getPublicKeyHash();
-      return ((int) hash[0]) + (((int) hash[1]) << 8) + (((int) hash[1]) << 16) + (((int) hash[1]) << 32);
+      byte[] bytes = getPublicKeyHash();
+      int hash = 0;
+      for (int i = 0; i < bytes.length; i++) {
+         hash = (hash << 8) + (bytes[i] & 0xff);
+      }
+      return hash;
    }
 
    @Override
@@ -76,16 +81,31 @@ public class PublicKey implements Serializable {
       return HexUtils.toHex(_pubKeyBytes);
    }
 
-   public boolean verifyStandardBitcoinSignature(Sha256Hash data, byte[] signature) {
+   public boolean verifyStandardBitcoinSignature(Sha256Hash data, byte[] signature, boolean forceLowS) {
       // Decode parameters r and s
       ByteReader reader = new ByteReader(signature);
-
       Signature params = Signatures.decodeSignatureParameters(reader);
       if (params == null) {
          return false;
       }
       // Make sure that we have a hash type at the end
       if (reader.available() != 1) {
+         return false;
+      }
+      if (forceLowS) {
+         return Signatures.verifySignatureLowS(data.getBytes(), params, getQ());
+      } else {
+         return Signatures.verifySignature(data.getBytes(), params, getQ());
+      }
+
+   }
+
+   // same as verifyStandardBitcoinSignature, but dont enforce the hash-type check
+   public boolean verifyDerEncodedSignature(Sha256Hash data, byte[] signature){
+      // Decode parameters r and s
+      ByteReader reader = new ByteReader(signature);
+      Signature params = Signatures.decodeSignatureParameters(reader);
+      if (params == null) {
          return false;
       }
       return Signatures.verifySignature(data.getBytes(), params, getQ());
@@ -98,7 +118,7 @@ public class PublicKey implements Serializable {
       return getQ().isCompressed();
    }
 
-   Point getQ() {
+  public Point getQ() {
       if (_Q == null) {
          _Q = Parameters.curve.decodePoint(_pubKeyBytes);
       }

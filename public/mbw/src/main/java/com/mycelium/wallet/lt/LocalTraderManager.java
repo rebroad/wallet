@@ -1,13 +1,38 @@
-package com.mycelium.wallet.lt;
+/*
+ * Copyright 2013, 2014 Megion Research and Development GmbH
+ *
+ * Licensed under the Microsoft Reference Source License (MS-RSL)
+ *
+ * This license governs use of the accompanying software. If you use the software, you accept this license.
+ * If you do not accept the license, do not use the software.
+ *
+ * 1. Definitions
+ * The terms "reproduce," "reproduction," and "distribution" have the same meaning here as under U.S. copyright law.
+ * "You" means the licensee of the software.
+ * "Your company" means the company you worked for when you downloaded the software.
+ * "Reference use" means use of the software within your company as a reference, in read only form, for the sole purposes
+ * of debugging your products, maintaining your products, or enhancing the interoperability of your products with the
+ * software, and specifically excludes the right to distribute the software outside of your company.
+ * "Licensed patents" means any Licensor patent claims which read directly on the software as distributed by the Licensor
+ * under this license.
+ *
+ * 2. Grant of Rights
+ * (A) Copyright Grant- Subject to the terms of this license, the Licensor grants you a non-transferable, non-exclusive,
+ * worldwide, royalty-free copyright license to reproduce the software for reference use.
+ * (B) Patent Grant- Subject to the terms of this license, the Licensor grants you a non-transferable, non-exclusive,
+ * worldwide, royalty-free patent license under licensed patents for reference use.
+ *
+ * 3. Limitations
+ * (A) No Trademark License- This license does not grant you any rights to use the Licensor’s name, logo, or trademarks.
+ * (B) If you begin patent litigation against the Licensor over patents that you think may apply to the software
+ * (including a cross-claim or counterclaim in a lawsuit), your license to the software ends automatically.
+ * (C) The software is licensed "as-is." You bear the risk of using it. The Licensor gives no express warranties,
+ * guarantees or conditions. You may have additional consumer rights under your local laws which this license cannot
+ * change. To the extent permitted under your local laws, the Licensor excludes the implied warranties of merchantability,
+ * fitness for a particular purpose and non-infringement.
+ */
 
-import java.io.IOException;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+package com.mycelium.wallet.lt;
 
 import android.app.Activity;
 import android.content.Context;
@@ -15,11 +40,11 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.util.Log;
-
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GooglePlayServicesUtil;
 import com.google.android.gms.gcm.GoogleCloudMessaging;
 import com.google.common.base.Preconditions;
+import com.megiontechnologies.Bitcoins;
 import com.mrd.bitlib.crypto.InMemoryPrivateKey;
 import com.mrd.bitlib.crypto.PublicKey;
 import com.mrd.bitlib.model.Address;
@@ -27,41 +52,43 @@ import com.mycelium.lt.ApiUtils;
 import com.mycelium.lt.ChatMessageEncryptionKey;
 import com.mycelium.lt.api.LtApi;
 import com.mycelium.lt.api.LtApiException;
-import com.mycelium.lt.api.model.GpsLocation;
 import com.mycelium.lt.api.model.LtSession;
 import com.mycelium.lt.api.model.TradeSession;
 import com.mycelium.lt.api.model.TraderInfo;
 import com.mycelium.lt.api.params.LoginParameters;
-import com.mycelium.wallet.AndroidRandomSource;
+import com.mycelium.lt.location.Geocoder;
 import com.mycelium.wallet.Constants;
+import com.mycelium.wallet.GpsLocationFetcher.GpsLocationEx;
 import com.mycelium.wallet.MbwManager;
-import com.mycelium.wallet.Record;
-import com.mycelium.wallet.RecordManager;
-import com.mycelium.wallet.lt.api.CreateTrade;
 import com.mycelium.wallet.lt.api.CreateAd;
+import com.mycelium.wallet.lt.api.CreateTrade;
 import com.mycelium.wallet.lt.api.Request;
 import com.mycelium.wallet.persistence.TradeSessionDb;
+
+import java.io.IOException;
+import java.util.*;
 
 public class LocalTraderManager {
 
    public static final String GCM_SENDER_ID = "1025080855849";
 
    private static final String TAG = "LocalTraderManager";
+   public static final String LT_DERIVATION_SEED = "lt.mycelium.com";
 
    final private Context _context;
-   final private RecordManager _recordManager;
    final private TradeSessionDb _db;
    final private LtApi _api;
    final private MbwManager _mbwManager;
    final private Set<LocalTraderEventSubscriber> _subscribers;
    final private Thread _executer;
+   final private Geocoder _geocoder;
    private LtSession _session;
    final private List<Request> _requests;
    private boolean _isLoggedIn;
    private Address _localTraderAddress;
    private long _lastTraderSynchronization;
    private long _lastTraderNotification;
-   private GpsLocation _currentLocation;
+   private GpsLocationEx _currentLocation;
    private String _nickname;
    private boolean _isLocalTraderDisabled;
    private boolean _playSoundOnTradeNotification;
@@ -71,12 +98,18 @@ public class LocalTraderManager {
    private boolean _notificationsEnabled;
    private TraderInfo _cachedTraderInfo;
    private long _lastNotificationSoundTimestamp;
+   private String _localTraderPrivateKeyString;
+   private UUID _localTraderAccountId;
+   private InMemoryPrivateKey _localTraderPrivateKey;
 
-   public LocalTraderManager(Context context, RecordManager recordManager, TradeSessionDb db, LtApi api,
-         MbwManager mbwManager) {
+
+   public Geocoder getGeocoder() {
+      return _geocoder;
+   }
+
+   public LocalTraderManager(Context context, TradeSessionDb db, LtApi api, MbwManager mbwManager) {
       _notificationsEnabled = true;
       _context = context;
-      _recordManager = recordManager;
       _db = db;
       _api = api;
       _mbwManager = mbwManager;
@@ -87,28 +120,32 @@ public class LocalTraderManager {
       SharedPreferences preferences = _context.getSharedPreferences(Constants.LOCAL_TRADER_SETTINGS_NAME,
             Activity.MODE_PRIVATE);
 
+      // Nick name
       _nickname = preferences.getString(Constants.LOCAL_TRADER_NICKNAME_SETTING, null);
+
+      // Address
       String addressString = preferences.getString(Constants.LOCAL_TRADER_ADDRESS_SETTING, null);
       if (addressString != null) {
          _localTraderAddress = Address.fromString(addressString, _mbwManager.getNetwork());
          // May be null
       }
+      // Private key, may be null even if we have an address. This happens in the upgrade scenario where it is set later
+      _localTraderPrivateKeyString = preferences.getString(Constants.LOCAL_TRADER_KEY_SETTING, null);
+      // Account ID, may be null even if we have an address. This happens in the upgrade scenario where it is set later
+      String localTraderAccountIdString = preferences.getString(Constants.LOCAL_TRADER_ACCOUNT_ID_SETTING, null); // May be null
+      if (localTraderAccountIdString != null) {
+         _localTraderAccountId = UUID.fromString(localTraderAccountIdString);
+      }
 
       // Load location from preferences or use default
-      // _currentLocation = new
-      // GpsLocation(Constants.LOCAL_TRADER_DEFAULT_LOCATION.latitude,
-      // (float) Constants.LOCAL_TRADER_DEFAULT_LOCATION.longitude,
-      // Constants.LOCAL_TRADER_DEFAULT_LOCATION.name);
-
-      _currentLocation = new GpsLocation(preferences.getFloat(Constants.LOCAL_TRADER_LATITUDE_SETTING,
-            (float) Constants.LOCAL_TRADER_DEFAULT_LOCATION.latitude), preferences.getFloat(
-            Constants.LOCAL_TRADER_LONGITUDE_SETTING, (float) Constants.LOCAL_TRADER_DEFAULT_LOCATION.longitude),
-            preferences.getString(Constants.LOCAL_TRADER_LOCATION_NAME_SETTING,
-                  Constants.LOCAL_TRADER_DEFAULT_LOCATION.name));
+      _currentLocation = new GpsLocationEx(
+            preferences.getFloat(Constants.LOCAL_TRADER_LATITUDE_SETTING, (float) Constants.LOCAL_TRADER_DEFAULT_LOCATION.latitude),
+            preferences.getFloat(Constants.LOCAL_TRADER_LONGITUDE_SETTING, (float) Constants.LOCAL_TRADER_DEFAULT_LOCATION.longitude),
+            preferences.getString(Constants.LOCAL_TRADER_LOCATION_NAME_SETTING, Constants.LOCAL_TRADER_DEFAULT_LOCATION.name),
+            preferences.getString(Constants.LOCAL_TRADER_LOCATION_COUNTRY_CODE_SETTING, Constants.LOCAL_TRADER_DEFAULT_LOCATION.name));
 
       _isLocalTraderDisabled = preferences.getBoolean(Constants.LOCAL_TRADER_DISABLED_SETTING, false);
-      _playSoundOnTradeNotification = preferences.getBoolean(
-            Constants.LOCAL_TRADER_PLAY_SOUND_ON_TRADE_NOTIFICATION_SETTING, true);
+      _playSoundOnTradeNotification = preferences.getBoolean(Constants.LOCAL_TRADER_PLAY_SOUND_ON_TRADE_NOTIFICATION_SETTING, true);
       _useMiles = preferences.getBoolean(Constants.LOCAL_TRADER_USE_MILES_SETTING, false);
       _lastTraderSynchronization = preferences.getLong(Constants.LOCAL_TRADER_LAST_TRADER_SYNCHRONIZATION_SETTING, 0);
       _lastTraderNotification = preferences.getLong(Constants.LOCAL_TRADER_LAST_TRADER_NOTIFICATION_SETTING, 0);
@@ -119,6 +156,8 @@ public class LocalTraderManager {
 
       _traderChangeMonitor = new TraderChangeMonitor(this, _api);
       _tradeSessionChangeMonitor = new TradeSessionChangeMonitor(this, _api);
+
+      _geocoder = new FallBackGeocoder(_mbwManager);
    }
 
    public void subscribe(LocalTraderEventSubscriber listener) {
@@ -177,14 +216,20 @@ public class LocalTraderManager {
       return _notificationsEnabled;
    }
 
+   public UUID getLocalTraderAccountId() {
+      return _localTraderAccountId;
+   }
+
    public interface LocalManagerApiContext {
-      public void handleErrors(Request request, int errorCode);
+      void handleErrors(Request request, int errorCode);
 
-      public void updateLocalTradeSessions(Collection<TradeSession> collection);
+      void updateLocalTradeSessions(Collection<TradeSession> collection);
 
-      public void updateSingleTradeSession(TradeSession tradeSession);
+      void updateSingleTradeSession(TradeSession tradeSession);
 
-      public void cacheTraderInfo(TraderInfo traderInfo);
+      void cacheTraderInfo(TraderInfo traderInfo);
+
+      void unsetLocalTraderAccount();
    }
 
    private class Executor implements Runnable, LocalManagerApiContext {
@@ -255,8 +300,8 @@ public class LocalTraderManager {
             handleErrors(null, LtApi.ERROR_CODE_TRADER_DOES_NOT_EXIST);
             return false;
          }
-         String sigHashSessionId = ApiUtils.generateUuidHashSignature(privateKey, _session.id,
-               new AndroidRandomSource());
+         String sigHashSessionId = ApiUtils.generateUuidHashSignature(privateKey, _session.id
+         );
          try {
             // Login
             LoginParameters params = new LoginParameters(getLocalTraderAddress(), sigHashSessionId);
@@ -266,11 +311,7 @@ public class LocalTraderManager {
             return true;
          } catch (LtApiException e) {
             if (e.errorCode == LtApi.ERROR_CODE_INVALID_SESSION) {
-               if (renewSession()) {
-                  return login();
-               } else {
-                  return false;
-               }
+               return renewSession() && login();
             } else {
                handleErrors(null, e.errorCode);
                return false;
@@ -280,6 +321,10 @@ public class LocalTraderManager {
 
       public void updateLocalTradeSessions(Collection<TradeSession> collection) {
          LocalTraderManager.this.updateLocalTradeSessions(collection);
+      }
+
+      public void unsetLocalTraderAccount() {
+         LocalTraderManager.this.unsetLocalTraderAccount();
       }
 
       public void updateSingleTradeSession(TradeSession tradeSession) {
@@ -293,34 +338,34 @@ public class LocalTraderManager {
 
       public void handleErrors(Request request, int errorCode) {
          switch (errorCode) {
-         case LtApi.ERROR_CODE_INVALID_SESSION:
-            if (renewSession()) {
-               if (login()) {
-                  synchronized (_requests) {
-                     _requests.add(request);
-                     _requests.notify();
+            case LtApi.ERROR_CODE_INVALID_SESSION:
+               if (renewSession()) {
+                  if (login()) {
+                     synchronized (_requests) {
+                        _requests.add(request);
+                        _requests.notify();
+                     }
                   }
                }
-            }
-            break;
-         case LtApi.ERROR_CODE_NO_SERVER_CONNECTION:
-            notifyNoConnection(errorCode);
-            break;
-         case LtApi.ERROR_CODE_INCOMPATIBLE_API_VERSION:
-            notifyIncompatibleApiVersion(errorCode);
-            break;
-         case LtApi.ERROR_CODE_TRADER_DOES_NOT_EXIST:
-            _isLoggedIn = false;
-            _session = null;
-            // Disconnect trader account
-            unsetLocalTraderAccount();
-            notifyNoTraderAccount(errorCode);
-            break;
-         default:
-            _isLoggedIn = false;
-            _session = null;
-            notifyError(errorCode);
-            break;
+               break;
+            case LtApi.ERROR_CODE_NO_SERVER_CONNECTION:
+               notifyNoConnection(errorCode);
+               break;
+            case LtApi.ERROR_CODE_INCOMPATIBLE_API_VERSION:
+               notifyIncompatibleApiVersion(errorCode);
+               break;
+            case LtApi.ERROR_CODE_TRADER_DOES_NOT_EXIST:
+               _isLoggedIn = false;
+               _session = null;
+               // Disconnect trader account
+               unsetLocalTraderAccount();
+               notifyNoTraderAccount(errorCode);
+               break;
+            default:
+               _isLoggedIn = false;
+               _session = null;
+               notifyError(errorCode);
+               break;
          }
       }
 
@@ -516,14 +561,13 @@ public class LocalTraderManager {
    }
 
    private InMemoryPrivateKey getLocalTraderPrivateKey() {
-      Record record = _recordManager.getRecord(_localTraderAddress);
-      if (record != null && record.hasPrivateKey()) {
-         return record.key;
+      if (_localTraderPrivateKeyString == null) {
+         return null;
       }
-      if (_localTraderAddress != null) {
-         unsetLocalTraderAccount();
+      if (_localTraderPrivateKey == null) {
+         _localTraderPrivateKey = new InMemoryPrivateKey(_localTraderPrivateKeyString, _mbwManager.getNetwork());
       }
-      return null;
+      return _localTraderPrivateKey;
    }
 
    public ChatMessageEncryptionKey generateChatMessageEncryptionKey(PublicKey foreignPublicKey, UUID tradeSessionId) {
@@ -533,8 +577,13 @@ public class LocalTraderManager {
    public void unsetLocalTraderAccount() {
       _session = null;
       _localTraderAddress = null;
+      _localTraderAccountId = null;
+      _localTraderPrivateKey = null;
+      _localTraderPrivateKeyString = null;
       _nickname = null;
       SharedPreferences.Editor editor = getEditor();
+      editor.remove(Constants.LOCAL_TRADER_KEY_SETTING);
+      editor.remove(Constants.LOCAL_TRADER_ACCOUNT_ID_SETTING);
       editor.remove(Constants.LOCAL_TRADER_ADDRESS_SETTING);
       editor.remove(Constants.LOCAL_TRADER_NICKNAME_SETTING);
       setLastTraderSynchronization(0);
@@ -542,11 +591,16 @@ public class LocalTraderManager {
       editor.commit();
    }
 
-   public void setLocalTraderData(Address address, String nickname) {
+   public void setLocalTraderData(UUID accountId, InMemoryPrivateKey privateKey, Address address, String nickname) {
       _session = null;
       _localTraderAddress = Preconditions.checkNotNull(address);
+      _localTraderAccountId = Preconditions.checkNotNull(accountId);
+      _localTraderPrivateKey = Preconditions.checkNotNull(privateKey);
+      _localTraderPrivateKeyString = privateKey.getBase58EncodedPrivateKey(_mbwManager.getNetwork());
       _nickname = Preconditions.checkNotNull(nickname);
       SharedPreferences.Editor editor = getEditor();
+      editor.putString(Constants.LOCAL_TRADER_KEY_SETTING, _localTraderPrivateKeyString);
+      editor.putString(Constants.LOCAL_TRADER_ACCOUNT_ID_SETTING, accountId.toString());
       editor.putString(Constants.LOCAL_TRADER_ADDRESS_SETTING, address.toString());
       editor.putString(Constants.LOCAL_TRADER_NICKNAME_SETTING, nickname);
       editor.commit();
@@ -586,16 +640,17 @@ public class LocalTraderManager {
       return _lastTraderSynchronization < _lastTraderNotification;
    }
 
-   public void setLocation(GpsLocation location) {
+   public void setLocation(GpsLocationEx location) {
       SharedPreferences.Editor editor = getEditor();
       _currentLocation = location;
       editor.putFloat(Constants.LOCAL_TRADER_LATITUDE_SETTING, (float) location.latitude);
       editor.putFloat(Constants.LOCAL_TRADER_LONGITUDE_SETTING, (float) location.longitude);
       editor.putString(Constants.LOCAL_TRADER_LOCATION_NAME_SETTING, location.name);
+      editor.putString(Constants.LOCAL_TRADER_LOCATION_COUNTRY_CODE_SETTING, location.countryCode);
       editor.commit();
    }
 
-   public GpsLocation getUserLocation() {
+   public GpsLocationEx getUserLocation() {
       return _currentLocation;
    }
 
@@ -644,9 +699,9 @@ public class LocalTraderManager {
 
    public boolean isCaptchaRequired(Request request) {
       if (request instanceof CreateAd) {
-         return _session == null ? true : _session.captcha.contains(LtSession.CaptchaCommands.CREATE_SELL_ORDER);
+         return _session == null || _session.captcha.contains(LtSession.CaptchaCommands.CREATE_SELL_ORDER);
       } else if (request instanceof CreateTrade) {
-         return _session == null ? true : _session.captcha.contains(LtSession.CaptchaCommands.CREATE_INSTANT_BUY_ORDER);
+         return _session == null || _session.captcha.contains(LtSession.CaptchaCommands.CREATE_INSTANT_BUY_ORDER);
       }
       return false;
    }
@@ -694,11 +749,8 @@ public class LocalTraderManager {
    /**
     * Stores the registration ID and app versionCode in the application's
     * {@code SharedPreferences}.
-    * 
-    * @param context
-    *           application's context.
-    * @param regId
-    *           registration ID
+    *
+    * @param regId registration ID
     */
    private synchronized void storeGcmRegistrationId(String regId) {
       final SharedPreferences prefs = getGcmPreferences();
@@ -725,6 +777,19 @@ public class LocalTraderManager {
 
    private SharedPreferences getGcmPreferences() {
       return _context.getSharedPreferences(Constants.LOCAL_TRADER_GCM_SETTINGS_NAME, Activity.MODE_PRIVATE);
+   }
+
+   public LtApi getApi(){
+      return _api;
+   }
+
+   public LtSession getSession(){
+      return _session;
+   }
+
+   public Bitcoins getMinerFeeEstimation(){
+      // choose a fee to get included within the next two blocks - our estimation for next block ist often too high
+      return _mbwManager.getWalletManager(false).getLastFeeEstimations().getEstimation(2);
    }
 
 }

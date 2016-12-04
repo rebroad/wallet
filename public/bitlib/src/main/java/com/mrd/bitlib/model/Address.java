@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import java.util.List;
 
 import com.google.bitcoinj.Base58;
 
+import com.google.common.base.Function;
 import com.mrd.bitlib.util.BitUtils;
 import com.mrd.bitlib.util.HashUtils;
 import com.mrd.bitlib.util.Sha256Hash;
@@ -31,6 +32,13 @@ public class Address implements Serializable, Comparable<Address> {
 
    private static final long serialVersionUID = 1L;
    public static final int NUM_ADDRESS_BYTES = 21;
+   public static final Function<? super String,Address> FROM_STRING = new Function<String, Address>() {
+      @Override
+      public Address apply(String input) {
+         return Address.fromString(input);
+      }
+   };
+
    private byte[] _bytes;
    private String _address;
 
@@ -73,6 +81,11 @@ public class Address implements Serializable, Comparable<Address> {
       return addr;
    }
 
+   /**
+    * @param address string representation of an address
+    * @return an Address if address could be decoded with valid checksum and length of 21 bytes
+    *         null else
+    */
    public static Address fromString(String address) {
       if (address == null) {
          return null;
@@ -87,7 +100,7 @@ public class Address implements Serializable, Comparable<Address> {
       return new Address(bytes);
    }
 
-   public static Address fromMultisigBytes(byte[] bytes, NetworkParameters network) {
+   public static Address fromP2SHBytes(byte[] bytes, NetworkParameters network) {
       if (bytes.length != 20) {
          return null;
       }
@@ -184,9 +197,22 @@ public class Address implements Serializable, Comparable<Address> {
       return _address;
    }
 
+   public String getShortAddress() {
+      return this.getShortAddress(6);
+   }
+
+   public String getShortAddress(int showChars) {
+      StringBuilder sb = new StringBuilder();
+      String addressString = this.toString();
+      sb.append(addressString.substring(0, showChars));
+      sb.append("...");
+      sb.append(addressString.substring(addressString.length() - showChars));
+      return sb.toString();
+   }
+
    @Override
    public int hashCode() {
-      return ((_bytes[16] & 0xFF) << 0) | ((_bytes[17] & 0xFF) << 8) | ((_bytes[18] & 0xFF) << 16)
+      return ((_bytes[16] & 0xFF) /* << 0 */) | ((_bytes[17] & 0xFF) << 8) | ((_bytes[18] & 0xFF) << 16)
             | ((_bytes[19] & 0xFF) << 24);
    }
 
@@ -209,7 +235,6 @@ public class Address implements Serializable, Comparable<Address> {
 
    @Override
    public int compareTo(Address other) {
-
       // We sort on the actual address bytes.
       // We wish to achieve consistent sorting, the exact order is not
       // important.
@@ -220,8 +245,6 @@ public class Address implements Serializable, Comparable<Address> {
             return -1;
          } else if (a > b) {
             return 1;
-         } else {
-            continue;
          }
       }
       return 0;
@@ -236,6 +259,16 @@ public class Address implements Serializable, Comparable<Address> {
       return sb.toString();
    }
 
+   public String toDoubleLineString() {
+      StringBuilder sb = new StringBuilder();
+      String address = toString();
+      int splitIndex = address.length() / 2;
+      sb.append(address.substring(0, splitIndex)).append("\r\n");
+      sb.append(address.substring(splitIndex));
+      return sb.toString();
+   }
+
+
    public NetworkParameters getNetwork() {
       if (matchesNetwork(NetworkParameters.productionNetwork, getVersion())) return NetworkParameters.productionNetwork;
       if (matchesNetwork(NetworkParameters.testNetwork, getVersion())) return NetworkParameters.testNetwork;
@@ -245,5 +278,4 @@ public class Address implements Serializable, Comparable<Address> {
    private boolean matchesNetwork(NetworkParameters network, byte version) {
       return ((byte) (network.getStandardAddressHeader() & 0xFF)) == version || ((byte) (network.getMultisigAddressHeader() & 0xFF)) == version;
    }
-
 }

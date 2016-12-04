@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,21 +34,21 @@
 
 package com.mycelium.wallet;
 
-import java.math.BigDecimal;
-
 import android.app.Activity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 
+import java.math.BigDecimal;
+
 public class NumberEntry {
 
    private static final int DEL = -1;
    private static final int DOT = -2;
-   private static final int MAX_DIGITS_BEFORE_DOT = 7;
+   private static final int MAX_DIGITS_BEFORE_DOT = 9;
 
    public interface NumberEntryListener {
-      public void onEntryChanged(String entry);
+      public void onEntryChanged(String entry, boolean wasSet);
    }
 
    private NumberEntryListener _listener;
@@ -88,6 +88,15 @@ public class NumberEntry {
       }
       setClickListener((Button) _llNumberEntry.findViewById(R.id.btZero), 0);
       setClickListener((Button) _llNumberEntry.findViewById(R.id.btDel), DEL);
+
+      _llNumberEntry.findViewById(R.id.btDel).setOnLongClickListener(new View.OnLongClickListener() {
+         @Override
+         public boolean onLongClick(View v) {
+            _entry = "";
+            _listener.onEntryChanged(_entry, false);
+            return true;
+         }
+      });
    }
 
    private void clicked(int digit) {
@@ -112,7 +121,7 @@ public class NumberEntry {
          }
       } else {
          // Append Digit
-         if (digit == 0 && _entry.startsWith("0") && !hasDot()) {
+         if (digit == 0 && _entry.equals("0")) {
             // Only one leading zero
             return;
          }
@@ -128,10 +137,7 @@ public class NumberEntry {
          }
          _entry = _entry + (digit);
       }
-      _listener.onEntryChanged(_entry);
-      if (hasDot()) {
-
-      }
+      _listener.onEntryChanged(_entry, false);
    }
 
    private boolean hasDot() {
@@ -160,17 +166,17 @@ public class NumberEntry {
 
    public void setEntry(BigDecimal number, int maxDecimals) {
       _maxDecimals = maxDecimals;
-      if (number == null || number.equals(BigDecimal.ZERO)) {
+      if (number == null || number.compareTo(BigDecimal.ZERO) == 0) {
          _entry = "";
       } else {
-         _entry = number.toPlainString();
+         _entry = number.setScale(_maxDecimals, BigDecimal.ROUND_HALF_DOWN).stripTrailingZeros().toPlainString();
       }
-      _listener.onEntryChanged(_entry);
+      _listener.onEntryChanged(_entry, true);
    }
 
    public BigDecimal getEntryAsBigDecimal() {
       if (_entry.length() == 0) {
-         return null;
+         return BigDecimal.ZERO;
       }
       if (_entry.equals("0.")) {
          return BigDecimal.ZERO;
@@ -194,18 +200,18 @@ public class NumberEntry {
    }
 
    public void setEnabled(boolean enabled) {
-      ((Button) _llNumberEntry.findViewById(R.id.btOne)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btTwo)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btThree)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btFour)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btFive)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btSix)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btSeven)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btEight)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btNine)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btDot)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btZero)).setEnabled(enabled);
-      ((Button) _llNumberEntry.findViewById(R.id.btDel)).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btOne).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btTwo).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btThree).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btFour).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btFive).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btSix).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btSeven).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btEight).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btNine).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btDot).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btZero).setEnabled(enabled);
+      _llNumberEntry.findViewById(R.id.btDel).setEnabled(enabled);
    }
 
 }

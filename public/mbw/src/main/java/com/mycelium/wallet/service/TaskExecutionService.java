@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -47,6 +47,7 @@ import android.os.RemoteException;
 
 import com.google.common.base.Preconditions;
 import com.mycelium.wallet.HttpErrorCollector;
+import com.mycelium.wallet.MbwManager;
 
 public class TaskExecutionService extends Service {
 
@@ -175,13 +176,11 @@ public class TaskExecutionService extends Service {
    public void onCreate() {
       _state = ServiceTaskStatusEx.State.NOTRUNNING;
       _applicationContext = this.getApplicationContext();
-      _httpErrorCollector = HttpErrorCollector.registerInVM(getApplicationContext());
-      _serviceMessenger = new Messenger(new IncomingHandler());
-   }
 
-   @Override
-   public void onDestroy() {
-      super.onDestroy();
+      // todo!!!!!!!!!!!
+      _httpErrorCollector = HttpErrorCollector.registerInVM(getApplicationContext(), MbwManager.getInstance(null).getWapi());
+
+      _serviceMessenger = new Messenger(new IncomingHandler());
    }
 
 }

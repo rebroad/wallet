@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -131,9 +131,8 @@ public class BitUtils {
 
    /**
     * Read a number of bytes or throw.
-    * 
-    * @param size
-    *           The number of bytes read
+    *
+    * @param size The number of bytes read
     * @return The array of bytes read.
     * @throws IOException
     */
@@ -174,5 +173,15 @@ public class BitUtils {
       int lastIndex = Math.min(original.length, to);
       System.arraycopy(original, from, buf, 0, lastIndex - from);
       return buf;
+   }
+
+   /**
+    * Return the concatenation of two byte arrays in a new byte array
+    */
+   public static byte[] concatenate(byte[] a, byte[] b) {
+      byte[] result = new byte[a.length + b.length];
+      System.arraycopy(a, 0, result, 0, a.length);
+      System.arraycopy(b, 0, result, a.length, b.length);
+      return result;
    }
 }

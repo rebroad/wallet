@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -54,7 +54,7 @@ public class PersistedOutput implements Serializable {
       this.address = address;
       this.height = height;
       this.value = value;
-      this.script = script;
+      this.script = script.clone();
       this.isCoinBase = isCoinBase;
    }
 

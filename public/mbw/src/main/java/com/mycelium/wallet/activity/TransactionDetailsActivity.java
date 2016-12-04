@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -40,42 +40,34 @@ import java.util.Locale;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.content.Context;
-import android.content.Intent;
-import android.graphics.Typeface;
-import android.net.Uri;
 import android.os.Bundle;
-import android.text.SpannableString;
-import android.text.style.UnderlineSpan;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.WindowManager;
-import android.view.View.OnClickListener;
 import android.widget.LinearLayout;
 import android.widget.LinearLayout.LayoutParams;
 import android.widget.TextView;
-import android.widget.Toast;
 
-import com.google.common.base.Joiner;
-import com.mrd.bitlib.util.ByteReader;
-import com.mrd.mbwapi.api.ApiException;
-import com.mrd.mbwapi.api.ApiObject;
-import com.mrd.mbwapi.api.TransactionSummary;
-import com.mrd.mbwapi.api.TransactionSummary.Item;
+import android.widget.Toast;
+import com.mrd.bitlib.util.CoinUtil;
+import com.mrd.bitlib.util.Sha256Hash;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
 import com.mycelium.wallet.Utils;
+import com.mycelium.wallet.activity.util.AddressLabel;
+import com.mycelium.wallet.activity.util.TransactionConfirmationsDisplay;
+import com.mycelium.wallet.activity.util.TransactionDetailsLabel;
+import com.mycelium.wapi.model.TransactionDetails;
+import com.mycelium.wapi.model.TransactionSummary;
 
 public class TransactionDetailsActivity extends Activity {
 
-   private static final String BLOCKCHAIN_INFO_TRANSACTION_LINK_TEMPLATE = "https://blockchain.info/tx/";
-   private static final String BLOCKCHAIN_INFO_ADDRESS_LINK_TEMPLATE = "https://blockchain.info/address/";
    @SuppressWarnings("deprecation")
    private static final LayoutParams FPWC = new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.WRAP_CONTENT, 1);
    private static final LayoutParams WCWC = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, 1);
-   private TransactionSummary _tx;
+   private TransactionDetails _tx;
+   private TransactionSummary _txs;
    private int _white_color;
-   private UrlClickListener _urlClickListener;
    private MbwManager _mbwManager;
 
    /**
@@ -88,50 +80,45 @@ public class TransactionDetailsActivity extends Activity {
       super.onCreate(savedInstanceState);
 
       _white_color = getResources().getColor(R.color.white);
-      _urlClickListener = new UrlClickListener();
       setContentView(R.layout.transaction_details_activity);
       _mbwManager = MbwManager.getInstance(this.getApplication());
 
-      // Get intent parameters
-      byte[] bytes = getIntent().getByteArrayExtra("transaction");
-      if (bytes != null) {
-         try {
-            _tx = ApiObject.deserialize(TransactionSummary.class, new ByteReader(bytes));
-         } catch (ApiException e) {
-            Toast.makeText(this, e.getMessage(), Toast.LENGTH_LONG).show();
-            finish();
-            return;
-         }
-      } else {
-         finish();
-         return;
-      }
-      updateUi();
-   }
+      Sha256Hash txid = (Sha256Hash) getIntent().getSerializableExtra("transaction");
+      _tx = _mbwManager.getSelectedAccount().getTransactionDetails(txid);
+      _txs = _mbwManager.getSelectedAccount().getTransactionSummary(txid);
 
-   private void setLinkText(TextView tv, String text) {
-      SpannableString link = new SpannableString(text);
-      link.setSpan(new UnderlineSpan(), 0, text.length(), 0);
-      tv.setText(link);
-      tv.setTextColor(getResources().getColor(R.color.brightblue));
+      updateUi();
    }
 
    private void updateUi() {
       // Set Hash
-      String hash = _tx.hash.toString();
-      String choppedHash = Joiner.on(" ").join(Utils.stringChopper(hash, 4));
-      TextView tvHash = ((TextView) findViewById(R.id.tvHash));
-      setLinkText(tvHash, choppedHash);
-      tvHash.setTag(BLOCKCHAIN_INFO_TRANSACTION_LINK_TEMPLATE + hash);
-      tvHash.setOnClickListener(_urlClickListener);
+      TransactionDetailsLabel tvHash = ((TransactionDetailsLabel) findViewById(R.id.tvHash));
+      tvHash.setTransaction(_tx);
+
 
       // Set Confirmed
+      int confirmations = _tx.calculateConfirmations(_mbwManager.getSelectedAccount().getBlockChainHeight());
       String confirmed;
       if (_tx.height > 0) {
          confirmed = getResources().getString(R.string.confirmed_in_block, _tx.height);
       } else {
          confirmed = getResources().getString(R.string.no);
       }
+
+      // check if tx is in outgoing queue
+      TransactionConfirmationsDisplay confirmationsDisplay = (TransactionConfirmationsDisplay) findViewById(R.id.tcdConfirmations);
+      TextView confirmationsCount = (TextView) findViewById(R.id.tvConfirmations);
+
+      if (_txs!=null && _txs.isQueuedOutgoing){
+         confirmationsDisplay.setNeedsBroadcast();
+         confirmationsCount.setText("");
+         confirmed = getResources().getString(R.string.transaction_not_broadcasted_info);
+      }else {
+         confirmationsDisplay.setConfirmations(confirmations);
+         confirmationsCount.setText(String.valueOf(confirmations));
+
+      }
+
       ((TextView) findViewById(R.id.tvConfirmed)).setText(confirmed);
 
       // Set Date & Time
@@ -146,110 +133,95 @@ public class TransactionDetailsActivity extends Activity {
 
       // Set Inputs
       LinearLayout inputs = (LinearLayout) findViewById(R.id.llInputs);
-      for (Item item : _tx.inputs) {
+      for (TransactionDetails.Item item : _tx.inputs) {
          inputs.addView(getItemView(item));
       }
 
       // Set Outputs
       LinearLayout outputs = (LinearLayout) findViewById(R.id.llOutputs);
-      for (Item item : _tx.outputs) {
+      for (TransactionDetails.Item item : _tx.outputs) {
          outputs.addView(getItemView(item));
       }
 
       // Set Fee
-      String fee = _mbwManager.getBtcValueString(getFee(_tx));
+      final long txFeeTotal = getFee(_tx);
+      String fee = _mbwManager.getBtcValueString(txFeeTotal);
+
+      if (_tx.rawSize > 0) {
+         final long txFeePerSat = txFeeTotal / _tx.rawSize;
+         fee += String.format("\n%d sat/byte", txFeePerSat);
+      }
       ((TextView) findViewById(R.id.tvFee)).setText(fee);
 
    }
 
-   private long getFee(TransactionSummary tx) {
+   private long getFee(TransactionDetails tx) {
       long inputs = sum(tx.inputs);
       long outputs = sum(tx.outputs);
       return inputs - outputs;
    }
 
-   private long sum(Item[] items) {
+   private long sum(TransactionDetails.Item[] items) {
       long sum = 0;
-      for (Item item : items) {
+      for (TransactionDetails.Item item : items) {
          sum += item.value;
       }
       return sum;
    }
 
-   private View getItemView(Item item) {
+   private View getItemView(TransactionDetails.Item item) {
       // Create vertical linear layout
       LinearLayout ll = new LinearLayout(this);
       ll.setOrientation(LinearLayout.VERTICAL);
       ll.setLayoutParams(WCWC);
 
-      String address = item.address.toString();
+      if (item.isCoinbase) {
+         // Coinbase input
+         ll.addView(getValue(item.value, null));
+         ll.addView(getCoinbaseText());
+      } else {
+         String address = item.address.toString();
 
-      // Add BTC value
-      ll.addView(getValue(item.value, address));
+         // Add BTC value
+         ll.addView(getValue(item.value, address));
 
-      // Add address chunks
-      String[] chunks = Utils.stringChopper(address, 12);
-      ll.addView(getAddressChunk(chunks[0], -1, address));
-      ll.addView(getAddressChunk(chunks[1], -1, address));
-      ll.addView(getAddressChunk(chunks[2], 0, address));
-
+         AddressLabel adrLabel = new AddressLabel(this);
+         adrLabel.setAddress(item.address);
+         ll.addView(adrLabel);
+      }
       ll.setPadding(10, 10, 10, 10);
-      ll.setOnClickListener(_urlClickListener);
-      ll.setTag(BLOCKCHAIN_INFO_ADDRESS_LINK_TEMPLATE + address);
       return ll;
    }
 
-   private TextView getAddressChunk(String chunk, int padding, Object tag) {
+
+   private View getCoinbaseText() {
       TextView tv = new TextView(this);
       tv.setLayoutParams(FPWC);
       tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-      setLinkText(tv, chunk);
-      tv.setTypeface(Typeface.MONOSPACE);
-      tv.setPadding(0, 0, 0, padding);
-      tv.setTag(tag);
-
+      tv.setText(R.string.newly_generated_coins_from_coinbase);
+      tv.setTextColor(_white_color);
       return tv;
    }
 
-   private View getValue(long value, Object tag) {
+   private View getValue(final long value, Object tag) {
       TextView tv = new TextView(this);
       tv.setLayoutParams(FPWC);
       tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
       tv.setText(_mbwManager.getBtcValueString(value));
       tv.setTextColor(_white_color);
       tv.setTag(tag);
+
+      tv.setOnLongClickListener(new View.OnLongClickListener() {
+         @Override
+         public boolean onLongClick(View v) {
+            Utils.setClipboardString(CoinUtil.valueString(value, _mbwManager.getCurrencySwitcher().getBitcoinDenomination(), false), getApplicationContext());
+            Toast.makeText(getApplicationContext(), R.string.copied_to_clipboard, Toast.LENGTH_SHORT).show();
+            return true;
+         }
+      });
+
+
       return tv;
-   }
-
-   @SuppressWarnings("unused")
-   private class CopyClickListener implements OnClickListener {
-
-      @Override
-      public void onClick(View v) {
-         if (v.getTag() == null) {
-            return;
-         }
-         Context context = TransactionDetailsActivity.this;
-         Utils.setClipboardString(v.getTag().toString(), TransactionDetailsActivity.this);
-         Toast.makeText(context, R.string.copied_to_clipboard, Toast.LENGTH_SHORT).show();
-      }
-   }
-
-   private class UrlClickListener implements OnClickListener {
-
-      @Override
-      public void onClick(View v) {
-         if (v.getTag() == null) {
-            return;
-         }
-         String url = v.getTag().toString();
-         Intent intent = new Intent(Intent.ACTION_VIEW);
-         intent.setData(Uri.parse(url));
-         startActivity(intent);
-         Toast.makeText(TransactionDetailsActivity.this, R.string.redirecting_to_blockchain_info, Toast.LENGTH_SHORT)
-               .show();
-
-      }
    }
 
 }

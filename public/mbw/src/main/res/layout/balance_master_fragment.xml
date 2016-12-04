@@ -1,54 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="fill_parent"
-    android:layout_height="fill_parent" >
+             xmlns:tools="http://schemas.android.com/tools"
+             android:layout_width="fill_parent"
+             android:layout_height="fill_parent">
 
     <ScrollView
-        android:layout_width="fill_parent"
-        android:layout_height="wrap_content" >
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content">
 
         <LinearLayout
-            android:layout_width="fill_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical" >
-
-            <fragment
                 android:layout_width="fill_parent"
                 android:layout_height="wrap_content"
-                class="com.mycelium.wallet.activity.main.AddressFragment" />
+                android:orientation="vertical">
 
-            <fragment
-                android:layout_width="fill_parent"
-                android:layout_height="wrap_content"
-                class="com.mycelium.wallet.activity.main.BalanceFragment" />
+            <FrameLayout
+                    android:layout_width="fill_parent"
+                    android:layout_height="wrap_content"
+                    android:id="@+id/phFragmentAddress"
+                    tools:layout="@layout/address_view"/>
 
-            <View
-                android:layout_width="fill_parent"
-                android:layout_height="5dp" />
+            <FrameLayout
+                    android:id="@+id/phFragmentBalance"
+                    android:layout_width="fill_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingBottom="5dp"
+                    tools:layout="@layout/main_balance_view"/>
 
-            <fragment
-                android:layout_width="fill_parent"
-                android:layout_height="wrap_content"
-                class="com.mycelium.wallet.activity.main.NoticeFragment" />
+            <FrameLayout
+                    android:id="@+id/phFragmentNotice"
+                    android:layout_width="fill_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingBottom="5dp"
+                    tools:layout="@layout/backup_verification_warning_dialog"/>
 
-            <View
-                android:layout_width="fill_parent"
-                android:layout_height="5dp" />
+            <FrameLayout
+                    android:id="@+id/phFragmentGlidera"
+                    android:layout_width="fill_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingBottom="10dp"
+                    tools:layout="@layout/main_buy_sell_fragment"/>
 
-            <fragment
-                android:layout_width="fill_parent"
-                android:layout_height="wrap_content"
-                class="com.mycelium.wallet.activity.main.LocalTraderFragment" />
         </LinearLayout>
     </ScrollView>
 
     <TextView
-        android:id="@+id/tvBuildText"
-        style="@style/MyceliumText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|right"
-        android:textColor="@color/transparentgrey"
-        android:textSize="12sp" />
+            android:id="@+id/tvBuildText"
+            style="@style/MyceliumText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|right"
+            android:textColor="@color/transparentgrey"
+            android:textSize="12sp"/>
+
+    <TextView
+            android:id="@+id/tvTorState"
+            style="@style/MyceliumText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|left"
+            android:textColor="@color/transparentgrey"
+            android:textSize="12sp"
+            android:visibility="gone"/>
 
 </FrameLayout>

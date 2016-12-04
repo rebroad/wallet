@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,41 +34,18 @@
 
 package com.mycelium.wallet.api;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-
-import com.mrd.bitlib.model.Address;
-import com.mrd.bitlib.model.OutPoint;
-import com.mrd.bitlib.model.Transaction;
-import com.mrd.bitlib.util.Sha256Hash;
-import com.mrd.mbwapi.api.ApiError;
-import com.mrd.mbwapi.api.ApiException;
-import com.mrd.mbwapi.api.BroadcastTransactionRequest;
-import com.mrd.mbwapi.api.BroadcastTransactionResponse;
-import com.mrd.mbwapi.api.GetTransactionDataRequest;
-import com.mrd.mbwapi.api.GetTransactionDataResponse;
-import com.mrd.mbwapi.api.MyceliumWalletApi;
-import com.mrd.mbwapi.api.QueryAddressSetStatusRequest;
-import com.mrd.mbwapi.api.QueryAddressSetStatusResponse;
-import com.mrd.mbwapi.api.QueryTransactionInventoryExResponse;
-import com.mrd.mbwapi.api.QueryTransactionInventoryRequest;
-import com.mrd.mbwapi.api.QueryTransactionSummaryRequest;
-import com.mrd.mbwapi.api.QueryTransactionSummaryResponse;
-import com.mrd.mbwapi.api.TransactionSummary;
-import com.mrd.mbwapi.api.WalletVersionRequest;
-import com.mrd.mbwapi.api.WalletVersionResponse;
-import com.mycelium.wallet.Constants;
-import com.mycelium.wallet.api.ApiCache.TransactionInventory;
-import com.mycelium.wallet.api.ApiCache.TransactionInventory.Item;
-import com.mycelium.wallet.event.BlockchainError;
-import com.mycelium.wallet.event.SyncStarted;
-import com.mycelium.wallet.event.SyncStopped;
-import com.mycelium.wallet.event.TransactionHistoryReady;
 import com.mycelium.wallet.event.WalletVersionEvent;
+import com.mycelium.wallet.event.WalletVersionExEvent;
+import com.mycelium.wapi.api.Wapi;
+import com.mycelium.wapi.api.WapiException;
+import com.mycelium.wapi.api.request.VersionInfoExRequest;
+import com.mycelium.wapi.api.request.VersionInfoRequest;
+import com.mycelium.wapi.api.response.*;
 import com.squareup.otto.Bus;
+
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
 
 
 /**
@@ -81,24 +58,17 @@ import com.squareup.otto.Bus;
  */
 public abstract class AsynchronousApi {
 
-   public static final String PROCESS_EXCHANGE_RATE = "ExchangeRate";
-   public static final String PROCESS_TX_SUMMARY = "Transaction summary";
-   public static final String PROCESS_UPDATECHECK = "update check";
 
-
-   private final MyceliumWalletApi _api;
-   private final ApiCache _cache;
+   private final Wapi _wapi;
    private final Bus eventBus;
 
    /**
     * Create a new asynchronous API instance.
     *
-    * @param api   The MWAPI instance used for communicating with the MWAPI server.
-    * @param cache The account cache instance used.
+    * @param wapi The WAPI instance used for communicating with the WAPI server.
     */
-   public AsynchronousApi(MyceliumWalletApi api, ApiCache cache, Bus eventBus) {
-      _api = api;
-      _cache = cache;
+   public AsynchronousApi(Wapi wapi, Bus eventBus) {
+      _wapi = wapi;
       this.eventBus = eventBus;
    }
 
@@ -106,12 +76,10 @@ public abstract class AsynchronousApi {
    abstract protected CallbackRunnerInvoker createCallbackRunnerInvoker();
 
 
-   public void getWalletVersion(final WalletVersionRequest versionRequest) {
-      eventBus.post(new SyncStarted(PROCESS_UPDATECHECK));
-      AbstractCallbackHandler<WalletVersionResponse> callback = new AbstractCallbackHandler<WalletVersionResponse>() {
+   public void getWalletVersion(final VersionInfoRequest versionRequest) {
+      AbstractCallbackHandler<VersionInfoResponse> callback = new AbstractCallbackHandler<VersionInfoResponse>() {
          @Override
-         public void handleCallback(WalletVersionResponse response, ApiError exception) {
-            eventBus.post(new SyncStopped(PROCESS_UPDATECHECK));
+         public void handleCallback(VersionInfoResponse response, WapiException exception) {
             final WalletVersionEvent latestVersion;
             if (response == null) {
                latestVersion = new WalletVersionEvent();
@@ -121,21 +89,60 @@ public abstract class AsynchronousApi {
             eventBus.post(latestVersion);
          }
       };
-      getWalletVersion(versionRequest,callback);
+      getWalletVersion(versionRequest, callback);
    }
 
-   public void getWalletVersion(final WalletVersionRequest req, AbstractCallbackHandler<WalletVersionResponse> callback) {
-      executeRequest(new AbstractCaller<WalletVersionResponse>(callback) {
+   public void getWalletVersion(final VersionInfoRequest req, AbstractCallbackHandler<VersionInfoResponse> callback) {
+      executeRequest(new AbstractCaller<VersionInfoResponse>(callback) {
          @Override
-         protected void callFunction() throws ApiException {
-            _response = _api.getVersionInfo(req);
+         protected void callFunction() throws WapiException {
+            _response = _wapi.getVersionInfo(req).getResult();
+         }
+      });
+   }
+
+   // call this function to test various warnings
+   public void getWalletVersionExTestHelper(final VersionInfoExRequest versionRequest) {
+
+      AbstractCallbackHandler<VersionInfoExResponse> callback = new AbstractCallbackHandler<VersionInfoExResponse>() {
+         @Override
+         public void handleCallback(VersionInfoExResponse response, WapiException exception) {
+            List<FeatureWarning> warnings = new ArrayList<FeatureWarning>();
+            //warnings.add(new FeatureWarning(Feature.APP_START, WarningKind.WARN, "AppStart", URI.create("https://google.com")));
+            //warnings.add(new FeatureWarning(Feature.CASHILA, WarningKind.BLOCK, "Warning message", URI.create("https://mycelium.com")));
+            //warnings.add(new FeatureWarning(Feature.CASHILA_NEW_PAYMENT, WarningKind.WARN, "NEWPAY Warning message", URI.create("https://mycelium.com")));
+            //warnings.add(new FeatureWarning(Feature.CASHILA_PAY, WarningKind.WARN, "PAY Warning message", URI.create("https://mycelium.com")));
+            response = new VersionInfoExResponse(null, "Neue super Version", URI.create("https://mycelium.com/bitcoinwallet"), warnings);
+            eventBus.post(new WalletVersionExEvent(response));
+         }
+      };
+      getWalletVersionEx(versionRequest, callback);
+   }
+
+   public void getWalletVersionEx(final VersionInfoExRequest versionRequest) {
+      AbstractCallbackHandler<VersionInfoExResponse> callback = new AbstractCallbackHandler<VersionInfoExResponse>() {
+         @Override
+         public void handleCallback(VersionInfoExResponse response, WapiException exception) {
+            if (response != null) {
+               eventBus.post(new WalletVersionExEvent(response));
+            }
+         }
+      };
+      getWalletVersionEx(versionRequest, callback);
+   }
+
+   public void getWalletVersionEx(final VersionInfoExRequest req, AbstractCallbackHandler<VersionInfoExResponse> callback) {
+      executeRequest(new AbstractCaller<VersionInfoExResponse>(callback) {
+         @Override
+         protected void callFunction() throws WapiException {
+            _response = _wapi.getVersionInfoEx(req).getResult();
          }
       });
    }
 
    abstract private class SynchronousFunctionCaller implements Runnable, AsyncTask {
 
-      protected ApiError _error;
+      protected WapiException _error;
       private volatile boolean _canceled;
 
       @Override
@@ -147,8 +154,8 @@ public abstract class AsynchronousApi {
       public void run() {
          try {
             callFunction();
-         } catch (ApiException e) {
-            _error = new ApiError(e.errorCode, e.getMessage());
+         } catch (WapiException e) {
+            _error = new WapiException(e.errorCode);
          } finally {
             if (_canceled) {
                return; //todo fix please this will swallow OOME and other errors
@@ -157,7 +164,7 @@ public abstract class AsynchronousApi {
          }
       }
 
-      abstract protected void callFunction() throws ApiException;
+      abstract protected void callFunction() throws WapiException;
 
       abstract protected void callback();
 
@@ -175,7 +182,7 @@ public abstract class AsynchronousApi {
       }
 
       @Override
-      protected abstract void callFunction() throws ApiException;
+      protected abstract void callFunction() throws WapiException;
 
       protected void callback() {
          _callbackInvoker.invoke(new AbstractCallbackRunner<T>(_callbackHandler, _response, _error));
@@ -185,9 +192,9 @@ public abstract class AsynchronousApi {
    private static class AbstractCallbackRunner<T> implements Runnable {
       private AbstractCallbackHandler<T> _callbackHandler;
       private T _response;
-      private ApiError _error;
+      private WapiException _error;
 
-      private AbstractCallbackRunner(AbstractCallbackHandler<T> callbackHandler, T response, ApiError error) {
+      private AbstractCallbackRunner(AbstractCallbackHandler<T> callbackHandler, T response, WapiException error) {
          _callbackHandler = callbackHandler;
          _response = response;
          _error = error;
@@ -203,168 +210,6 @@ public abstract class AsynchronousApi {
    private synchronized void executeRequest(SynchronousFunctionCaller caller) {
       Thread thread = new Thread(caller);
       thread.start();
-   }
-
-   /**
-    * Get the transaction history inventory of a list of bitcoin addresses.
-    *
-    * @return an {@link AsyncTask} instance that allows the caller to cancel the
-    * call back.
-    */
-   public AsyncTask getTransactionSummary(final Collection<Address> addresses) {
-      eventBus.post(new SyncStarted(PROCESS_TX_SUMMARY));
-      AbstractCaller<QueryTransactionSummaryResponse> caller = new AbstractCaller<QueryTransactionSummaryResponse>(
-            new AbstractCallbackHandler<QueryTransactionSummaryResponse>() {
-               @Override
-               public void handleCallback(QueryTransactionSummaryResponse response, ApiError exception) {
-                  if (exception == null) {
-                     eventBus.post(new TransactionHistoryReady(response));
-                  } else {
-                     eventBus.post(new BlockchainError(exception));
-                  }
-                  eventBus.post(new SyncStopped(PROCESS_TX_SUMMARY));
-               }
-            }) {
-
-         @Override
-         protected void callFunction() throws ApiException {
-            QueryTransactionInventoryRequest request = new QueryTransactionInventoryRequest(new LinkedList<Address>(
-                  addresses), Constants.TRANSACTION_HISTORY_LENGTH);
-
-            // Get the inventory
-            QueryTransactionInventoryExResponse inv = _api.queryTransactionInventoryEx(request);
-            int chainHeight = inv.chainHeight;
-
-            // Fetch what we can from the cache, the rest we get from the server
-            List<TransactionSummary> txList = new LinkedList<TransactionSummary>();
-            List<Sha256Hash> hashesToFetch = new LinkedList<Sha256Hash>();
-            for (Map.Entry<Address, List<QueryTransactionInventoryExResponse.Item>> entry : inv.inventoryMap.entrySet()) {
-               for (QueryTransactionInventoryExResponse.Item item : entry.getValue()) {
-                  // Fetch from cache
-                  TransactionSummary txSummary = _cache.getTransactionSummary(item.hash.toString());
-
-                  if (txSummary == null || txSummary.height == -1 || chainHeight - txSummary.height <= 6) {
-                     // Fetch transaction if we don't have it in our cache, if
-                     // the
-                     // cached version is unconfirmed, or if
-                     // the height of the cached version is less than 6
-                     // confirmations
-                     hashesToFetch.add(item.hash);
-                  } else {
-                     txList.add(txSummary);
-                  }
-               }
-            }
-
-            // Fetch the rest from the server, if any
-            if (hashesToFetch.size() > 0) {
-               QueryTransactionSummaryResponse result = _api
-                     .queryTransactionSummary(new QueryTransactionSummaryRequest(hashesToFetch));
-               txList.addAll(result.transactions);
-
-               // Note that chain height might have changed since the call above
-               chainHeight = result.chainHeight;
-
-               // Insert new transactions in cache
-               for (TransactionSummary t : result.transactions) {
-                  _cache.addTransactionSummary(t);
-               }
-
-            }
-
-            // Insert inventory in cache
-            for (Map.Entry<Address, List<QueryTransactionInventoryExResponse.Item>> entry : inv.inventoryMap.entrySet()) {
-               _cache.setTransactionInventory(entry.getKey(), toInventory(entry.getValue(), inv.chainHeight));
-            }
-
-            // Sort result
-            Collections.sort(txList);
-
-            _response = new QueryTransactionSummaryResponse(txList, chainHeight);
-         }
-
-      };
-      executeRequest(caller);
-      return caller;
-   }
-
-   private TransactionInventory toInventory(List<QueryTransactionInventoryExResponse.Item> items, int chainHeight) {
-      List<Item> translatedItems = new LinkedList<TransactionInventory.Item>();
-      for (QueryTransactionInventoryExResponse.Item item : items) {
-         translatedItems.add(new TransactionInventory.Item(item.hash, item.height));
-      }
-      return new TransactionInventory(translatedItems, chainHeight);
-   }
-
-
-   /**
-    * Get the active output inventory of a set of addresses.
-    *
-    * @param callbackHandler The callback handler to call
-    * @return an {@link AsyncTask} instance that allows the caller to cancel the
-    * call back.
-    */
-   public AsyncTask getActiveOutputInventory(final Collection<Address> addresses,
-                                             AbstractCallbackHandler<QueryAddressSetStatusResponse> callbackHandler) {
-      AbstractCaller<QueryAddressSetStatusResponse> caller = new AbstractCaller<QueryAddressSetStatusResponse>(
-            callbackHandler) {
-
-         @Override
-         protected void callFunction() throws ApiException {
-            QueryAddressSetStatusRequest request = new QueryAddressSetStatusRequest(addresses);
-            _response = _api.queryActiveOutputsInventory(request);
-         }
-
-      };
-      executeRequest(caller);
-      return caller;
-   }
-
-   /**
-    * Get a list of outputs and transactions for a list of outpoints and
-    * transaction IDs.
-    *
-    * @param callbackHandler The callback handler to call
-    * @return an {@link AsyncTask} instance that allows the caller to cancel the
-    * call back.
-    */
-   public AsyncTask getTransactionData(final List<OutPoint> outputsToGet, final List<OutPoint> sourcedOutputsToGet,
-                                       final List<Sha256Hash> txIds, AbstractCallbackHandler<GetTransactionDataResponse> callbackHandler) {
-      AbstractCaller<GetTransactionDataResponse> caller = new AbstractCaller<GetTransactionDataResponse>(
-            callbackHandler) {
-
-         @Override
-         protected void callFunction() throws ApiException {
-            GetTransactionDataRequest request = new GetTransactionDataRequest(outputsToGet, sourcedOutputsToGet, txIds);
-            _response = _api.getTransactionData(request);
-         }
-
-      };
-      executeRequest(caller);
-      return caller;
-   }
-
-   /**
-    * Broadcast a transaction
-    *
-    * @param callbackHandler The callback handler to call
-    * @return an {@link AsyncTask} instance that allows the caller to cancel the
-    * call back.
-    */
-   public AsyncTask broadcastTransaction(final Transaction transaction,
-                                         AbstractCallbackHandler<BroadcastTransactionResponse> callbackHandler) {
-      AbstractCaller<BroadcastTransactionResponse> caller = new AbstractCaller<BroadcastTransactionResponse>(
-            callbackHandler) {
-
-         @Override
-         protected void callFunction() throws ApiException {
-            BroadcastTransactionRequest request = new BroadcastTransactionRequest(transaction);
-            _response = _api.broadcastTransaction(request);
-         }
-
-      };
-      executeRequest(caller);
-      return caller;
    }
 
 }

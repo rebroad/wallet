@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -222,7 +222,7 @@ public class SolveCaptchaActivity extends Activity implements NumberEntryListene
             Toast.makeText(SolveCaptchaActivity.this, R.string.lt_captcha_wrong, Toast.LENGTH_LONG).show();
             updateUi();
          }
-      };
+      }
    };
 
    private Integer getSolution() {
@@ -234,7 +234,7 @@ public class SolveCaptchaActivity extends Activity implements NumberEntryListene
    }
 
    @Override
-   public void onEntryChanged(String entry) {
+   public void onEntryChanged(String entry, boolean wasSet) {
       updateUi();
    }
 

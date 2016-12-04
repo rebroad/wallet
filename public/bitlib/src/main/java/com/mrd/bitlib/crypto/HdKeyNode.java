@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,17 @@
 
 package com.mrd.bitlib.crypto;
 
+import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
+import java.util.List;
+import java.util.UUID;
 
 import com.google.bitcoinj.Base58;
 import com.google.common.base.Preconditions;
 import com.mrd.bitlib.crypto.ec.Parameters;
 import com.mrd.bitlib.crypto.ec.Point;
+import com.mrd.bitlib.model.hdpath.HdKeyPath;
 import com.mrd.bitlib.model.NetworkParameters;
 import com.mrd.bitlib.util.BitUtils;
 import com.mrd.bitlib.util.ByteReader;
@@ -34,9 +38,11 @@ import com.mrd.bitlib.util.ByteWriter;
  * <p>
  * https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki
  */
-public class HdKeyNode {
+public class HdKeyNode implements Serializable {
 
-   public static class KeyGenerationException extends Exception {
+   public static final int HARDENED_MARKER = 0x80000000;
+
+   public static class KeyGenerationException extends RuntimeException {
       private static final long serialVersionUID = 1L;
 
       public KeyGenerationException(String message) {
@@ -45,6 +51,7 @@ public class HdKeyNode {
    }
 
    private static final String BITCOIN_SEED = "Bitcoin seed";
+   private static final int CHAIN_CODE_SIZE = 32;
 
    private final InMemoryPrivateKey _privateKey;
    private final PublicKey _publicKey;
@@ -52,6 +59,62 @@ public class HdKeyNode {
    private final int _depth;
    private final int _parentFingerprint;
    private final int _index;
+
+   /**
+    * Convert to custom fast parsable byte format. XXX This is very much
+    * experimental
+    */
+   public void toCustomByteFormat(ByteWriter writer) {
+      if (isPrivateHdKeyNode()) {
+         writer.put((byte) 1);
+         Preconditions.checkArgument(_privateKey.getPrivateKeyBytes().length == 32);
+         writer.putBytes(_privateKey.getPrivateKeyBytes());
+      } else {
+         writer.put((byte) 0);
+      }
+      Preconditions.checkArgument(_publicKey.getPublicKeyBytes().length == 33);
+      writer.putBytes(_publicKey.getPublicKeyBytes());
+      writer.putBytes(_chainCode);
+      writer.putIntLE(_depth);
+      writer.putIntLE(_parentFingerprint);
+      writer.putIntLE(_index);
+   }
+
+   /**
+    * Convert to custom fast parsable byte format. XXX This is very much
+    * experimental
+    */
+   public byte[] toCustomByteFormat() {
+      ByteWriter writer = new ByteWriter(1024);
+      toCustomByteFormat(writer);
+      return writer.toBytes();
+   }
+
+   /**
+    * Create from custom fast parsable byte format. XXX This is very much
+    * experimental
+    */
+   public static HdKeyNode fromCustomByteformat(byte[] bytes) throws InsufficientBytesException {
+      return fromCustomByteformat(new ByteReader(bytes));
+   }
+
+   /**
+    * Create from custom fast parsable byte format. XXX This is very much
+    * experimental
+    */
+   public static HdKeyNode fromCustomByteformat(ByteReader reader) throws InsufficientBytesException {
+      boolean hasPrivateKey = reader.get() == 1;
+      if (hasPrivateKey) {
+         // Private key node
+         InMemoryPrivateKey privateKey = new InMemoryPrivateKey(reader.getBytes(32), reader.getBytes(33));
+         return new HdKeyNode(privateKey, reader.getBytes(CHAIN_CODE_SIZE), reader.getIntLE(), reader.getIntLE(),
+               reader.getIntLE());
+      } else {
+         // Public key node
+         return new HdKeyNode(new PublicKey(reader.getBytes(33)), reader.getBytes(CHAIN_CODE_SIZE), reader.getIntLE(),
+               reader.getIntLE(), reader.getIntLE());
+      }
+   }
 
    HdKeyNode(InMemoryPrivateKey privateKey, byte[] chainCode, int depth, int parentFingerprint, int index) {
       _privateKey = privateKey;
@@ -62,7 +125,7 @@ public class HdKeyNode {
       _index = index;
    }
 
-   HdKeyNode(PublicKey publicKey, byte[] chainCode, int depth, int parentFingerprint, int index) {
+   public HdKeyNode(PublicKey publicKey, byte[] chainCode, int depth, int parentFingerprint, int index) {
       _privateKey = null;
       _publicKey = publicKey;
       _chainCode = chainCode;
@@ -99,7 +162,7 @@ public class HdKeyNode {
       InMemoryPrivateKey privateKey = new InMemoryPrivateKey(IL, true);
 
       // Construct chain code
-      byte[] IR = BitUtils.copyOfRange(I, 32, 64);
+      byte[] IR = BitUtils.copyOfRange(I, 32, 32 + CHAIN_CODE_SIZE);
       return new HdKeyNode(privateKey, IR, 0, 0, 0);
    }
 
@@ -155,6 +218,37 @@ public class HdKeyNode {
       return createChildNode(index)._publicKey;
    }
 
+
+   /**
+    * Create the Bip32 derived child from this KeyNode, according to the keyPath.
+    *
+    * @param keyPath
+    *           the Bip32 Path
+    * @return the child node corresponding to the current node + keyPath
+    */
+   public HdKeyNode createChildNode(HdKeyPath keyPath){
+      List<Integer> addrN = keyPath.getAddressN();
+      HdKeyNode ak = this;
+      for (Integer i : addrN){
+         ak = ak.createChildNode(i);
+      }
+      return ak;
+   }
+
+   /**
+    * Create the hardened child node of this node with the corresponding index
+    *
+    * @param index
+    *           the index to use
+    * @return the child node corresponding to the specified index
+    * @throws KeyGenerationException
+    *            if this is a public key node which is hardened, or if no key
+    *            can be created for this index (extremely unlikely)
+    */
+   public HdKeyNode createHardenedChildNode(int index) throws KeyGenerationException {
+      return createChildNode(index | HARDENED_MARKER);
+   }
+
    /**
     * Create the child node of this node with the corresponding index
     * 
@@ -168,7 +262,7 @@ public class HdKeyNode {
    public HdKeyNode createChildNode(int index) throws KeyGenerationException {
       byte[] data;
       byte[] publicKeyBytes = _publicKey.getPublicKeyBytes();
-      if (0 == (index & 0x80000000)) {
+      if (0 == (index & HARDENED_MARKER)) {
          // Not hardened key
          ByteWriter writer = new ByteWriter(publicKeyBytes.length + 4);
          writer.putBytes(publicKeyBytes);
@@ -192,7 +286,7 @@ public class HdKeyNode {
       BigInteger m = new BigInteger(1, lL);
       if (m.compareTo(Parameters.n) >= 0) {
          throw new KeyGenerationException(
-               "An unlikely thing happened: A key derivation paramter is larger than the N modulus of the curve");
+               "An unlikely thing happened: A key derivation parameter is larger than the N modulus of the curve");
       }
 
       if (isPrivateHdKeyNode()) {
@@ -344,21 +438,21 @@ public class HdKeyNode {
          }
 
          int depth = ((int) reader.get()) & 0xFF;
-         int fingerprint = reader.getIntBE();
+         int parentFingerprint = reader.getIntBE();
          int index = reader.getIntBE();
-         byte[] chainCode = reader.getBytes(32);
+         byte[] chainCode = reader.getBytes(CHAIN_CODE_SIZE);
          if (isPrivate) {
             if (reader.get() != (byte) 0x00) {
                throw new KeyGenerationException("Invalid private key");
             }
             InMemoryPrivateKey privateKey = new InMemoryPrivateKey(reader.getBytes(32), true);
-            return new HdKeyNode(privateKey, chainCode, depth, fingerprint, index);
+            return new HdKeyNode(privateKey, chainCode, depth, parentFingerprint, index);
          } else {
             PublicKey publicKey = new PublicKey(reader.getBytes(33));
-            return new HdKeyNode(publicKey, chainCode, depth, fingerprint, index);
+            return new HdKeyNode(publicKey, chainCode, depth, parentFingerprint, index);
          }
       } catch (InsufficientBytesException e) {
-         throw new KeyGenerationException("Insufficient bytes in serialiation");
+         throw new KeyGenerationException("Insufficient bytes in serialization");
       }
    }
 
@@ -402,5 +496,29 @@ public class HdKeyNode {
          return false;
       }
       return this.isPrivateHdKeyNode() == other.isPrivateHdKeyNode();
+   }
+
+   // returns the own index of this key
+   public int getIndex(){
+      return _index;
+   }
+
+   // returns the parent fingerprint
+   public int getParentFingerprint(){
+      return _parentFingerprint;
+   }
+
+   // return the hierarchical depth of this node
+   public int getDepth(){
+      return _depth;
+   }
+
+
+   // generate internal uuid from public key of the HdKeyNode
+   public UUID getUuid() {
+      // Create a UUID from the byte indexes 8-15 and 16-23 of the account public key
+      byte[] publicKeyBytes = this.getPublicKey().getPublicKeyBytes();
+      return new UUID(BitUtils.uint64ToLong(publicKeyBytes, 8), BitUtils.uint64ToLong(
+            publicKeyBytes, 16));
    }
 }

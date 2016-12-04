@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -59,15 +59,21 @@ public class GetFromAddressBookActivity extends ActionBarActivity {
 
       ActionBar bar = getSupportActionBar();
       bar.setNavigationMode(ActionBar.NAVIGATION_MODE_TABS);
-      // bar.setDisplayOptions(1, 0);
 
       mTabsAdapter = new TabsAdapter(this, mViewPager, _mbwManager);
 
       Tab myAddressesTab = bar.newTab();
-      mTabsAdapter.addTab(myAddressesTab.setText(getResources().getString(R.string.my_addresses)), AddressBookFragment.class, addressBookBundle(true));
+      mTabsAdapter.addTab(myAddressesTab.setText(getResources().getString(R.string.my_accounts)), AddressBookFragment.class, addressBookBundle(true));
       Tab contactsTab = bar.newTab();
       mTabsAdapter.addTab(contactsTab.setText(getResources().getString(R.string.foreign_addresses)), AddressBookFragment.class, addressBookBundle(false));
-      bar.selectTab(myAddressesTab);
+
+      int countContactsEntries = _mbwManager.getMetadataStorage().getAllAddressLabels().size();
+
+      if (countContactsEntries > 0) {
+         bar.selectTab(contactsTab);
+      }else {
+         bar.selectTab(myAddressesTab);
+      }
    }
 
    private Bundle addressBookBundle(boolean own) {

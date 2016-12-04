@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research & Development GmbH
+ * Copyright 2013, 2014 Megion Research & Development GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,5 +19,5 @@ package com.mrd.bitlib.crypto;
 import com.mrd.bitlib.util.Sha256Hash;
 
 public interface BitcoinSigner {
-   public byte[] makeStandardBitcoinSignature(Sha256Hash transactionSigningHash, RandomSource randomSource);
+   public byte[] makeStandardBitcoinSignature(Sha256Hash transactionSigningHash);
 }

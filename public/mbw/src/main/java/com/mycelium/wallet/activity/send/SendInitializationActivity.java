@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -36,65 +36,80 @@ package com.mycelium.wallet.activity.send;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.View;
 import android.view.Window;
 
-import com.mrd.bitlib.model.Address;
-import com.mrd.mbwapi.api.ExchangeRate;
-import com.mycelium.wallet.ExchangeRateManager;
-import com.mycelium.wallet.MbwManager;
-import com.mycelium.wallet.R;
-import com.mycelium.wallet.Utils;
-import com.mycelium.wallet.Wallet;
-import com.mycelium.wallet.Wallet.SpendableOutputs;
-import com.mycelium.wallet.event.BlockchainError;
-import com.mycelium.wallet.event.BlockchainReady;
+import com.google.common.base.Preconditions;
+import com.mycelium.wallet.*;
+import com.mycelium.wallet.event.SyncFailed;
+import com.mycelium.wallet.event.SyncStopped;
+import com.mycelium.wapi.wallet.WalletAccount;
 import com.squareup.otto.Subscribe;
+
+import java.util.UUID;
 
 public class SendInitializationActivity extends Activity {
    private MbwManager _mbwManager;
-   private Wallet _wallet;
-   private Long _amountToSend;
-   private Address _receivingAddress;
+   private WalletAccount _account;
+   private BitcoinUri _uri;
    private boolean _isColdStorage;
-   private Double _oneBtcInFiat;
-   private Handler _synchnozingHandler;
+   private Handler _synchronizingHandler;
    private Handler _slowNetworkHandler;
-   private SpendableOutputs _spendable;
-   private boolean _done;
-   private boolean _ignoreExchangeRates;
+   private byte[] _rawPr;
 
-   public static void callMe(Activity currentActivity, Wallet wallet, boolean isColdStorage, Double oneBtcInFiat) {
+   public static void callMe(Activity currentActivity, UUID account, boolean isColdStorage) {
       Intent intent = new Intent(currentActivity, SendInitializationActivity.class);
-      intent.putExtra("wallet", wallet);
+      intent.putExtra("account", account);
+
+      //we dont know anything specific yet
+      intent.putExtra("uri", new BitcoinUri(null, null, null));
+
       intent.putExtra("isColdStorage", isColdStorage);
-      intent.putExtra("oneBtcInFiat", oneBtcInFiat);
       intent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT);
       currentActivity.startActivity(intent);
    }
 
-   public static void callMeWithResult(Activity currentActivity, Wallet wallet, Long amountToSend,
-         Address receivingAddress, boolean isColdStorage, int request) {
-      Intent intent = prepareSendingIntent(currentActivity, wallet, amountToSend, receivingAddress, isColdStorage);
+   public static Intent getIntent(Activity currentActivity, UUID account, boolean isColdStorage) {
+      return prepareSendingIntent(currentActivity, account, (BitcoinUri)null, isColdStorage);
+   }
+
+   public static void callMeWithResult(Activity currentActivity, UUID account, BitcoinUri uri, boolean isColdStorage, int request) {
+      Intent intent = prepareSendingIntent(currentActivity, account, uri, isColdStorage);
       currentActivity.startActivityForResult(intent, request);
 
    }
 
-   public static void callMe(Activity currentActivity, Wallet wallet, Long amountToSend, Address receivingAddress,
-         boolean isColdStorage) {
-      Intent intent = prepareSendingIntent(currentActivity, wallet, amountToSend, receivingAddress, isColdStorage);
+   public static void callMe(Activity currentActivity, UUID account, BitcoinUri uri, boolean isColdStorage) {
+      Intent intent = prepareSendingIntent(currentActivity, account, uri, isColdStorage);
       intent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT);
       currentActivity.startActivity(intent);
    }
 
-   private static Intent prepareSendingIntent(Activity currentActivity, Wallet wallet, Long amountToSend,
-         Address receivingAddress, boolean isColdStorage) {
+   public static void callMe(Activity currentActivity, UUID account, byte[] rawPaymentRequest, boolean isColdStorage) {
+      Intent intent = prepareSendingIntent(currentActivity, account, rawPaymentRequest, isColdStorage);
+      intent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT);
+      currentActivity.startActivity(intent);
+   }
+
+   private static Intent prepareSendingIntent(Activity currentActivity, UUID account, BitcoinUri uri, boolean isColdStorage) {
       Intent intent = new Intent(currentActivity, SendInitializationActivity.class);
-      intent.putExtra("wallet", wallet);
-      intent.putExtra("amountToSend", amountToSend);
-      intent.putExtra("receivingAddress", receivingAddress);
+      intent.putExtra("account", account);
+      intent.putExtra("uri", uri);
+      intent.putExtra("isColdStorage", isColdStorage);
+      return intent;
+   }
+
+   public static void callMeWithResult(Activity currentActivity, UUID account, byte[] rawPaymentRequest, boolean isColdStorage, int request) {
+      Intent intent = prepareSendingIntent(currentActivity, account, rawPaymentRequest, isColdStorage);
+      currentActivity.startActivityForResult(intent, request);
+   }
+   private static Intent prepareSendingIntent(Activity currentActivity, UUID account, byte[] rawPaymentRequest, boolean isColdStorage) {
+      Intent intent = new Intent(currentActivity, SendInitializationActivity.class);
+      intent.putExtra("account", account);
+      intent.putExtra("rawPr", rawPaymentRequest);
       intent.putExtra("isColdStorage", isColdStorage);
       return intent;
    }
@@ -106,59 +121,48 @@ public class SendInitializationActivity extends Activity {
       setContentView(R.layout.send_initialization_activity);
       _mbwManager = MbwManager.getInstance(getApplication());
       // Get intent parameters
-      _wallet = (Wallet) getIntent().getSerializableExtra("wallet");
-      // May be null
-      _amountToSend = (Long) getIntent().getSerializableExtra("amountToSend");
-      // May be null
-      _receivingAddress = (Address) getIntent().getSerializableExtra("receivingAddress");
-      // May be null
-      _oneBtcInFiat = (Double) getIntent().getSerializableExtra("oneBtcInFiat");
+      UUID accountId = Preconditions.checkNotNull((UUID) getIntent().getSerializableExtra("account"));
+
+      _uri = (BitcoinUri) getIntent().getSerializableExtra("uri");
+      _rawPr =  getIntent().getByteArrayExtra("rawPr");
       _isColdStorage = getIntent().getBooleanExtra("isColdStorage", false);
-
-      // Load saved state if any
-      if (savedInstanceState != null) {
-         _oneBtcInFiat = (Double) savedInstanceState.getSerializable("oneBtcInFiat");
-         _spendable = (SpendableOutputs) savedInstanceState.getSerializable("spendable");
-         _done = savedInstanceState.getBoolean("done");
-      }
-   }
-
-   @Override
-   protected void onSaveInstanceState(Bundle outState) {
-      outState.putSerializable("oneBtcInFiat", _oneBtcInFiat);
-      outState.putSerializable("spendable", _spendable);
-      outState.putBoolean("done", _done);
-      super.onSaveInstanceState(outState);
+      _account = _mbwManager.getWalletManager(_isColdStorage).getAccount(accountId);
    }
 
    @Override
    protected void onResume() {
       _mbwManager.getEventBus().register(this);
-      _mbwManager.getExchamgeRateManager().subscribe(excahngeSubscriber);
-      _synchnozingHandler = new Handler();
-      _synchnozingHandler.postDelayed(showSynchronizing, 2000);
+
+      // Show delayed messages so the user does not grow impatient
+      _synchronizingHandler = new Handler();
+      _synchronizingHandler.postDelayed(showSynchronizing, 2000);
       _slowNetworkHandler = new Handler();
       _slowNetworkHandler.postDelayed(showSlowNetwork, 6000);
-      continueIfDoneOrSynchronize();
+
+      // If we don't have a fresh exchange rate, now is a good time to request one, as we will need it in a minute
+      if (_mbwManager.getCurrencySwitcher().getExchangeRatePrice() == null) {
+         _mbwManager.getExchangeRateManager().requestRefresh();
+      }
+
+      // If we are in cold storage spending mode we wish to synchronize the wallet
+      if (_isColdStorage) {
+         _mbwManager.getWalletManager(true).startSynchronization();
+      } else {
+         continueIfReady();
+      }
       super.onResume();
    }
 
    @Override
    protected void onPause() {
-      if (_synchnozingHandler != null) {
-         _synchnozingHandler.removeCallbacks(showSynchronizing);
+      if (_synchronizingHandler != null) {
+         _synchronizingHandler.removeCallbacks(showSynchronizing);
       }
       if (_slowNetworkHandler != null) {
          _slowNetworkHandler.removeCallbacks(showSlowNetwork);
       }
-      _mbwManager.getExchamgeRateManager().unsubscribe(excahngeSubscriber);
       _mbwManager.getEventBus().unregister(this);
       super.onPause();
-   }
-
-   @Override
-   protected void onDestroy() {
-      super.onDestroy();
    }
 
    private Runnable showSynchronizing = new Runnable() {
@@ -178,68 +182,39 @@ public class SendInitializationActivity extends Activity {
    };
 
    @Subscribe
-   public void blockChainReady(BlockchainReady blockchainReady) {
-      _spendable = _wallet.getLocalSpendableOutputs(_mbwManager.getBlockChainAddressTracker());
-      // Check whether we are done
-      continueIfDoneOrSynchronize();
+   public void syncFailed(SyncFailed event) {
+      Utils.toastConnectionError(this);
+      // If we are in cold storage spending mode there is no point in continuing.
+      // If we continued we would think that there were no funds on the private key
+      if (_isColdStorage) {
+         finish();
+      }
    }
 
    @Subscribe
-   public void syncFailed(BlockchainError blockchainError) {
-      Utils.toastConnectionError(this);
-      finish();
+   public void syncStopped(SyncStopped sync) {
+      continueIfReady();
    }
 
-   private ExchangeRateManager.EventSubscriber excahngeSubscriber = new ExchangeRateManager.EventSubscriber(
-         new Handler()) {
-
-      @Override
-      public void refreshingExchangeRatesFailed() {
-         Utils.toastConnectionError(SendInitializationActivity.this);
-         finish();
-      }
-
-      @Override
-      public void refreshingEcahngeRatesSuccedded() {
-         ExchangeRate rate = _mbwManager.getExchamgeRateManager().getExchangeRate();
-         if (rate != null) {
-            _oneBtcInFiat = rate.price; // price may still be null, in that case
-                                        // we continue without
-            _ignoreExchangeRates = true;
-         }
-         // Check whether we are done
-         continueIfDoneOrSynchronize();
-      }
-   };
-
-   private void continueIfDoneOrSynchronize() {
-      if (_done) {
+   private void continueIfReady() {
+      if (isFinishing()) {
          return;
       }
-      if (_spendable == null) {
-         // Request block chain sync
-         _wallet.requestUpdate(_mbwManager.getBlockChainAddressTracker());
+      if (_account.getBalance().isSynchronizing) {
+         // wait till its finished syncing
          return;
       }
-
-      if (_oneBtcInFiat == null && !_ignoreExchangeRates) {
-         ExchangeRate rate = _mbwManager.getExchamgeRateManager().getExchangeRate();
-         if (rate == null) {
-            // We need a refresh
-            _mbwManager.getExchamgeRateManager().requestRefresh();
-            return;
-         }
-         _oneBtcInFiat = rate.price; // price may still be null, in that case we
-                                     // just proceed and do without
-      }
-
-      // We are done call next activity
-      _done = true;
       if (_isColdStorage) {
-         ColdStorageSummaryActivity.callMe(this, _wallet, _spendable, _oneBtcInFiat);
+         ColdStorageSummaryActivity.callMe(this, _account.getId());
       } else {
-         SendMainActivity.callMe(this, _wallet, _spendable, _oneBtcInFiat, _amountToSend, _receivingAddress,
-               _isColdStorage);
+         Intent intent;
+         if (_rawPr != null) {
+            intent = SendMainActivity.getIntent(this, _account.getId(), _rawPr, false);
+         } else {
+            intent = SendMainActivity.getIntent(this, _account.getId(), _uri, false);
+         }
+         intent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT);
+         this.startActivity(intent);
       }
       finish();
    }

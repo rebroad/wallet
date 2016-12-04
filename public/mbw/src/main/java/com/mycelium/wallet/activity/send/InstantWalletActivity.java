@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -41,36 +41,34 @@ import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.Window;
 import android.view.WindowManager;
-
-import com.google.common.base.Preconditions;
-import com.mrd.bitlib.model.Address;
-import com.mrd.bitlib.model.NetworkParameters;
 import com.mycelium.wallet.MbwManager;
 import com.mycelium.wallet.R;
-import com.mycelium.wallet.Record;
+import com.mycelium.wallet.StringHandleConfig;
 import com.mycelium.wallet.Utils;
-import com.mycelium.wallet.Wallet;
+import com.mycelium.wallet.activity.EnterWordListActivity;
+import com.mycelium.wallet.activity.InstantMasterseedActivity;
 import com.mycelium.wallet.activity.ScanActivity;
+import com.mycelium.wallet.activity.StringHandlerActivity;
+import com.mycelium.wallet.extsig.keepkey.activity.InstantKeepKeyActivity;
+import com.mycelium.wallet.extsig.trezor.activity.InstantTrezorActivity;
+
+import java.util.ArrayList;
 
 public class InstantWalletActivity extends Activity {
 
-   public static final int SCAN_RESULT_CODE = 0;
-
-   private Long _amountToSend;
-   private Address _receivingAddress;
+   public static final int REQUEST_SCAN = 0;
+   private static final int REQUEST_TREZOR = 1;
+   private static final int IMPORT_WORDLIST = 2;
+   private static final int REQUEST_KEEPKEY = 3;
 
    public static void callMe(Activity currentActivity) {
-      callMe(currentActivity, null, null);
-   }
-
-   public static void callMe(Activity currentActivity, Long amountToSend, Address receivingAddress) {
       Intent intent = new Intent(currentActivity, InstantWalletActivity.class);
-      intent.putExtra("amountToSend", amountToSend);
-      intent.putExtra("receivingAddress", receivingAddress);
       currentActivity.startActivity(intent);
    }
 
-   /** Called when the activity is first created. */
+   /**
+    * Called when the activity is first created.
+    */
    @Override
    public void onCreate(Bundle savedInstanceState) {
       this.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -78,62 +76,100 @@ public class InstantWalletActivity extends Activity {
       super.onCreate(savedInstanceState);
       setContentView(R.layout.instant_wallet_activity);
 
-      // Get intent parameters
-      // May be null
-      _amountToSend = (Long) getIntent().getSerializableExtra("amountToSend");
-      // May be null
-      _receivingAddress = (Address) getIntent().getSerializableExtra("receivingAddress");
 
-      final Record record = getRecordFromClipboard();
-      if (record == null || !record.hasPrivateKey()) {
-         findViewById(R.id.btClipboard).setEnabled(false);
-      } else {
-         findViewById(R.id.btClipboard).setOnClickListener(new OnClickListener() {
+      findViewById(R.id.btClipboard).setOnClickListener(new OnClickListener() {
+         @Override
+         public void onClick(View arg0) {
+            handleString(Utils.getClipboardString(InstantWalletActivity.this));
+         }
+      });
 
-            @Override
-            public void onClick(View arg0) {
-               Wallet wallet = new Wallet(record);
-               SendInitializationActivity.callMe(InstantWalletActivity.this, wallet, _amountToSend, _receivingAddress,
-                     true);
-               InstantWalletActivity.this.finish();
-            }
-         });
-      }
+      findViewById(R.id.btMasterseed).setOnClickListener(new OnClickListener() {
+
+         @Override
+         public void onClick(View arg0) {
+            EnterWordListActivity.callMe(InstantWalletActivity.this, IMPORT_WORDLIST, true);
+         }
+      });
 
       findViewById(R.id.btScan).setOnClickListener(new OnClickListener() {
 
          @Override
          public void onClick(View arg0) {
-            ScanActivity.callMe(InstantWalletActivity.this, SCAN_RESULT_CODE);
+            ScanActivity.callMe(InstantWalletActivity.this, REQUEST_SCAN, StringHandleConfig.spendFromColdStorage());
          }
       });
 
+      findViewById(R.id.btTrezor).setOnClickListener(new OnClickListener() {
+         @Override
+         public void onClick(View arg0) {
+            InstantTrezorActivity.callMe(InstantWalletActivity.this, REQUEST_TREZOR);
+         }
+      });
+
+      findViewById(R.id.btKeepKey).setOnClickListener(new OnClickListener() {
+         @Override
+         public void onClick(View arg0) {
+            InstantKeepKeyActivity.callMe(InstantWalletActivity.this, REQUEST_KEEPKEY);
+         }
+      });
    }
 
-   private Record getRecordFromClipboard() {
-      String content = Utils.getClipboardString(InstantWalletActivity.this);
-      if (content.length() == 0) {
-         return null;
+   private void handleString(String str) {
+      Intent intent = StringHandlerActivity.getIntent(InstantWalletActivity.this,
+            StringHandleConfig.spendFromColdStorage(),
+            str);
+      InstantWalletActivity.this.startActivityForResult(intent, REQUEST_SCAN);
+   }
+
+   @Override
+   protected void onResume() {
+      super.onResume();
+      StringHandlerActivity.ParseAbility canHandle = StringHandlerActivity.canHandle(
+            StringHandleConfig.spendFromColdStorage(),
+            Utils.getClipboardString(InstantWalletActivity.this),
+            MbwManager.getInstance(this).getNetwork());
+
+      if (canHandle == StringHandlerActivity.ParseAbility.NO) {
+         findViewById(R.id.btClipboard).setEnabled(false);
+      } else {
+         findViewById(R.id.btClipboard).setEnabled(true);
       }
-      NetworkParameters network = MbwManager.getInstance(this).getNetwork();
-      return Record.fromString(content.toString(), network);
    }
 
    public void onActivityResult(final int requestCode, final int resultCode, final Intent intent) {
-      if (requestCode == SCAN_RESULT_CODE) {
-         if (resultCode == RESULT_OK) {
-            Record record = Preconditions.checkNotNull((Record) intent
-                  .getSerializableExtra(ScanActivity.RESULT_RECORD_KEY));
-            Wallet wallet = new Wallet(record);
-            SendInitializationActivity.callMe(this, wallet, _amountToSend, _receivingAddress, true);
-            // We don't call finish() here, so that this activity stays on the back stack.
-            // So the user can click back and scan the next cold storage.
-         } else {
+      if (requestCode == REQUEST_SCAN) {
+         if (resultCode != RESULT_OK) {
             ScanActivity.toastScanError(resultCode, intent, this);
+         }
+         // else {
+         // We don't call finish() here, so that this activity stays on the back stack.
+         // So the user can click back and scan the next cold storage.
+         // }
+      } else if (requestCode == REQUEST_TREZOR) {
+         if (resultCode == RESULT_OK) {
+            finish();
+         }
+      } else if (requestCode == REQUEST_KEEPKEY) {
+         if (resultCode == RESULT_OK) {
+            finish();
+         }
+      } else if (requestCode == IMPORT_WORDLIST) {
+         if (resultCode == RESULT_OK) {
+            ArrayList<String> wordList = intent.getStringArrayListExtra(EnterWordListActivity.MASTERSEED);
+            String password = intent.getStringExtra(EnterWordListActivity.PASSWORD);
+            InstantMasterseedActivity.callMe(this, wordList.toArray(new String[wordList.size()]), password);
+
          }
       } else {
          throw new IllegalStateException("unknown return codes after scanning... " + requestCode + " " + resultCode);
       }
    }
 
+   @Override
+   public void finish() {
+      // drop and create a new TempWalletManager so that no sensitive data remains in memory
+      MbwManager.getInstance(this).forgetColdStorageWalletManager();
+      super.finish();
+   }
 }

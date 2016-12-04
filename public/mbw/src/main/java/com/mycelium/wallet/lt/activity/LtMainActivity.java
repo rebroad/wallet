@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -34,7 +34,9 @@
 
 package com.mycelium.wallet.lt.activity;
 
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
@@ -52,24 +54,32 @@ import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GooglePlayServicesUtil;
+import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
+import com.mrd.bitlib.crypto.InMemoryPrivateKey;
 import com.mycelium.lt.api.LtApi;
 import com.mycelium.lt.api.model.TraderInfo;
-import com.mycelium.wallet.Constants;
-import com.mycelium.wallet.MbwManager;
-import com.mycelium.wallet.R;
-import com.mycelium.wallet.Utils;
+import com.mycelium.wallet.*;
+import com.mycelium.wallet.activity.export.ExportAsQrCodeActivity;
+import com.mycelium.wallet.external.glidera.activities.BuySellSelect;
 import com.mycelium.wallet.lt.LocalTraderEventSubscriber;
 import com.mycelium.wallet.lt.LocalTraderManager;
 import com.mycelium.wallet.lt.activity.buy.AdSearchFragment;
 import com.mycelium.wallet.lt.activity.sell.AdsFragment;
+import com.mycelium.wallet.lt.api.DeleteTrader;
 import com.mycelium.wallet.lt.api.GetTraderInfo;
+import com.mycelium.wapi.wallet.AesKeyCipher;
+import com.mycelium.wapi.wallet.ExportableAccount;
+import com.mycelium.wapi.wallet.KeyCipher;
+import com.mycelium.wapi.wallet.WalletAccount;
+
 
 public class LtMainActivity extends ActionBarActivity {
+   public static final String TAB_TO_SELECT = "tabToSelect";
 
    public enum TAB_TYPE {
-      DEFAULT, ACTIVE_TRADES, TRADE_HISTORY
-   };
+      DEFAULT, ACTIVE_TRADES, TRADE_HISTORY, MY_ADS
+   }
 
    public static void callMe(Context context, TAB_TYPE tabToSelect) {
       Intent intent = createIntent(context, tabToSelect);
@@ -78,25 +88,19 @@ public class LtMainActivity extends ActionBarActivity {
 
    public static Intent createIntent(Context context, TAB_TYPE tabToSelect) {
       Intent intent = new Intent(context, LtMainActivity.class);
-      intent.putExtra("tabToSelect", tabToSelect.ordinal());
+      intent.putExtra(TAB_TO_SELECT, tabToSelect.ordinal());
       return intent;
    }
 
-   @SuppressWarnings("unused")
-   private static final String TAG = "LtMainActivity";
-
    private ViewPager _viewPager;
-   private TabsAdapter _tabsAdapter;
    private MbwManager _mbwManager;
    private LocalTraderManager _ltManager;
-   ActionBar.Tab _myBuyBitcoinTab;
-   ActionBar.Tab _mySellBitcoinTab;
-   ActionBar.Tab _myActiveTradesTab;
-   ActionBar.Tab _myTradeHistoryTab;
-   ActionBar.Tab _myAdsTab;
-   ActionBar.Tab _myTraderInfoTab;
-   ActionBar _actionBar;
-   private TAB_TYPE _tabToSelect;
+   private Tab _myBuyBitcoinTab;
+   private Tab _mySellBitcoinTab;
+   private Tab _myActiveTradesTab;
+   private Tab _myTradeHistoryTab;
+   private Tab _myAdsTab;
+   private Tab _myTraderInfoTab;
    private boolean _hasWelcomed;
    private Ringtone _updateSound;
 
@@ -111,50 +115,49 @@ public class LtMainActivity extends ActionBarActivity {
 
       setContentView(_viewPager);
 
-      _actionBar = getSupportActionBar();
-      _actionBar.setNavigationMode(ActionBar.NAVIGATION_MODE_TABS);
+      ActionBar actionBar = getSupportActionBar();
+      actionBar.setNavigationMode(ActionBar.NAVIGATION_MODE_TABS);
       // to provide up navigation from actionbar, in case the modern main
       // activity is not on the stack
-      // todo find solution
-      // _actionBar.setDisplayHomeAsUpEnabled(true);
+      actionBar.setDisplayHomeAsUpEnabled(true);
 
-      _tabsAdapter = new TabsAdapter(this, _viewPager);
+      TabsAdapter tabsAdapter = new TabsAdapter(this, _viewPager);
 
       // Add Buy Bitcoin tab
-      _myBuyBitcoinTab = _actionBar.newTab();
+      _myBuyBitcoinTab = actionBar.newTab();
       _myBuyBitcoinTab.setText(getResources().getString(R.string.lt_buy_bitcoin_tab));
-      _tabsAdapter.addTab(_myBuyBitcoinTab, AdSearchFragment.class, AdSearchFragment.createArgs(true));
+      tabsAdapter.addTab(_myBuyBitcoinTab, AdSearchFragment.class, AdSearchFragment.createArgs(true));
 
       // Add Sell Bitcoin tab
-      _mySellBitcoinTab = _actionBar.newTab();
+      _mySellBitcoinTab = actionBar.newTab();
       _mySellBitcoinTab.setText(getResources().getString(R.string.lt_sell_bitcoin_tab));
-      _tabsAdapter.addTab(_mySellBitcoinTab, AdSearchFragment.class, AdSearchFragment.createArgs(false));
+      tabsAdapter.addTab(_mySellBitcoinTab, AdSearchFragment.class, AdSearchFragment.createArgs(false));
 
       // Add Active Trades tab
-      _myActiveTradesTab = _actionBar.newTab();
+      _myActiveTradesTab = actionBar.newTab();
       _myActiveTradesTab.setText(getResources().getString(R.string.lt_active_trades_tab));
-      _tabsAdapter.addTab(_myActiveTradesTab, ActiveTradesFragment.class, null);
+      tabsAdapter.addTab(_myActiveTradesTab, ActiveTradesFragment.class, null);
 
       // Add Historic Trades tab
-      _myTradeHistoryTab = _actionBar.newTab();
+      _myTradeHistoryTab = actionBar.newTab();
       _myTradeHistoryTab.setText(getResources().getString(R.string.lt_trade_history_tab));
-      _tabsAdapter.addTab(_myTradeHistoryTab, TradeHistoryFragment.class, null);
+      tabsAdapter.addTab(_myTradeHistoryTab, TradeHistoryFragment.class, null);
 
       // Add Ads tab
-      _myAdsTab = _actionBar.newTab();
+      _myAdsTab = actionBar.newTab();
       _myAdsTab.setText(getResources().getString(R.string.lt_my_ads_tab));
-      _myAdsTab.setTag(_tabsAdapter.getCount());
-      _tabsAdapter.addTab(_myAdsTab, AdsFragment.class, null);
+      _myAdsTab.setTag(tabsAdapter.getCount());
+      tabsAdapter.addTab(_myAdsTab, AdsFragment.class, null);
 
       // Add Trader Info tab
-      _myTraderInfoTab = _actionBar.newTab();
+      _myTraderInfoTab = actionBar.newTab();
       _myTraderInfoTab.setText(getResources().getString(R.string.lt_my_trader_info_tab));
-      _myTraderInfoTab.setTag(_tabsAdapter.getCount());
-      _tabsAdapter.addTab(_myTraderInfoTab, MyInfoFragment.class, null);
+      _myTraderInfoTab.setTag(tabsAdapter.getCount());
+      tabsAdapter.addTab(_myTraderInfoTab, MyInfoFragment.class, null);
 
       // Load the tab to select from intent
-      _tabToSelect = TAB_TYPE.values()[getIntent().getIntExtra("tabToSelect", TAB_TYPE.DEFAULT.ordinal())];
-      _actionBar.selectTab(enumToTab(_tabToSelect));
+      TAB_TYPE tabToSelect = TAB_TYPE.values()[getIntent().getIntExtra(TAB_TO_SELECT, TAB_TYPE.DEFAULT.ordinal())];
+      actionBar.selectTab(enumToTab(tabToSelect));
 
       _updateSound = RingtoneManager
             .getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION));
@@ -181,6 +184,11 @@ public class LtMainActivity extends ActionBarActivity {
       final boolean isAdsTab = tabIdx == ((TabsAdapter.TabInfo) _myAdsTab.getTag()).index;
       Preconditions.checkNotNull(menu.findItem(R.id.miAddAd)).setVisible(isAdsTab);
 
+      //check delete trade account visibility & backup account visibility
+      final boolean hasTradeAccAndIsInfoTab = _ltManager.hasLocalTraderAccount() && (tabIdx == ((TabsAdapter.TabInfo) _myTraderInfoTab.getTag()).index);
+      Preconditions.checkNotNull(menu.findItem(R.id.miDeleteTradeAccount).setVisible(hasTradeAccAndIsInfoTab));
+      Preconditions.checkNotNull(menu.findItem(R.id.miBackupLT).setVisible(hasTradeAccAndIsInfoTab));
+
       return super.onPrepareOptionsMenu(menu);
    }
 
@@ -192,11 +200,8 @@ public class LtMainActivity extends ActionBarActivity {
 
    @Override
    protected void onResume() {
-      checkGooglePlayServices();
-      showWelcomeMessage();
+      //showWelcomeMessage();
       // _ltManager.enableNotifications(false);
-      _ltManager.subscribe(ltSubscriber);
-      _ltManager.startMonitoringTrader();
       if (_ltManager.hasLocalTraderAccount()) {
          _ltManager.makeRequest(new GetTraderInfo());
       }
@@ -204,10 +209,23 @@ public class LtMainActivity extends ActionBarActivity {
    }
 
    @Override
-   protected void onPause() {
+   protected void onStart() {
+      checkGooglePlayServices();
+      _ltManager.subscribe(ltSubscriber);
+      _ltManager.startMonitoringTrader();
+      super.onStart();
+   }
+
+   @Override
+   protected void onStop() {
       _ltManager.stopMonitoringTrader();
       _ltManager.unsubscribe(ltSubscriber);
       // _ltManager.enableNotifications(true);
+      super.onStop();
+   }
+
+   @Override
+   protected void onPause() {
       super.onPause();
    }
 
@@ -216,20 +234,89 @@ public class LtMainActivity extends ActionBarActivity {
       final int itemId = item.getItemId();
       if (itemId == R.id.miHowTo) {
          openLocalTraderHelp();
+         return true;
       }
-      // todo find solution
-      // if (itemId == android.R.id.home) {
-      // // Respond to the action bar's home button, navigates to parent
-      // activity
-      // // TODO: as soon as this bug is resolved, NavUtils should be used.
-      // // http://code.google.com/p/android/issues/detail?id=58520
-      // // NavUtils.navigateUpFromSameTask(this);
-      // startActivity(new Intent(this, ModernMain.class));
-      // finish();
-      //
-      // return true;
-      // }
+      if(itemId == R.id.miBackupLT){
+         AlertDialog.Builder confirmDialog = new AlertDialog.Builder(this);
+         confirmDialog.setTitle(R.string.lt_confirm_title);
+         confirmDialog.setMessage(R.string.lt_confirm_backup_trader_message);
+         confirmDialog.setPositiveButton(R.string.yes, new DialogInterface.OnClickListener() {
+
+            public void onClick(DialogInterface arg0, int arg1) {
+               try {
+                  backupTraderAccount();
+               } catch (KeyCipher.InvalidKeyCipher invalidKeyCipher) {
+                  invalidKeyCipher.printStackTrace();
+               }
+            }
+         });
+         confirmDialog.setNegativeButton(R.string.no, new DialogInterface.OnClickListener() {
+
+            public void onClick(DialogInterface arg0, int arg1) {
+               // User clicked no
+            }
+         });
+         confirmDialog.show();
+
+
+        return true;
+      }
+
+      if (itemId == android.R.id.home) {
+        // Respond to the action bar's home button, navigates to parent activity
+        Intent intent = new Intent(this, BuySellSelect.class);
+        //This flag causes the back stack to be cleared until modern main is on top
+        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        startActivity(intent);
+
+        finish();
+        return true;
+      }
+      if (itemId == R.id.miDeleteTradeAccount) {
+         deleteTraderAccount();
+         return true;
+      }
       return super.onOptionsItemSelected(item);
+   }
+
+   private void backupTraderAccount() throws KeyCipher.InvalidKeyCipher {
+      WalletAccount account = _mbwManager.getWalletManager(false).getAccount(_ltManager.getLocalTraderAccountId());
+      final InMemoryPrivateKey privateKey = _mbwManager.obtainPrivateKeyForAccount(account, LocalTraderManager.LT_DERIVATION_SEED, AesKeyCipher.defaultKeyCipher());
+
+      ExportableAccount exportableAccount = new ExportableAccount() {
+         @Override
+         public Data getExportData(KeyCipher cipher) {
+            return new Data(
+                  Optional.of(privateKey.getBase58EncodedPrivateKey(_mbwManager.getNetwork())),
+                  Optional.of(privateKey.getPublicKey().toAddress(_mbwManager.getNetwork()).toString())
+            );
+         }
+      };
+
+      Intent intent = ExportAsQrCodeActivity.getIntent(this,
+            exportableAccount.getExportData(AesKeyCipher.defaultKeyCipher())
+      );
+      startActivity(intent);
+   }
+
+   private void deleteTraderAccount() {
+      AlertDialog.Builder confirmDialog = new AlertDialog.Builder(this);
+      confirmDialog.setTitle(R.string.lt_confirm_title);
+      confirmDialog.setMessage(R.string.lt_confirm_delete_trader_message);
+      confirmDialog.setPositiveButton(R.string.yes, new DialogInterface.OnClickListener() {
+
+         public void onClick(DialogInterface arg0, int arg1) {
+            _ltManager.makeRequest(new DeleteTrader());
+            finish();
+         }
+      });
+      confirmDialog.setNegativeButton(R.string.no, new DialogInterface.OnClickListener() {
+
+         public void onClick(DialogInterface arg0, int arg1) {
+            // User clicked no
+         }
+      });
+      confirmDialog.show();
    }
 
    private void openLocalTraderHelp() {
@@ -239,16 +326,17 @@ public class LtMainActivity extends ActionBarActivity {
       Toast.makeText(this, R.string.going_to_mycelium_com_help, Toast.LENGTH_LONG).show();
    }
 
-   /**
-    * Show welcome message
-    */
-   private void showWelcomeMessage() {
-      if (!_hasWelcomed) {
-         // Only show welcome message per activity instance
-         _hasWelcomed = true;
-         Utils.showOptionalMessage(this, R.string.lt_welcome_message);
-      }
-   }
+//  Welcome message disabled for now as the text is outdated. Kept the code so we can change the text later on if we wish
+//   /**
+//    * Show welcome message
+//    */
+//   private void showWelcomeMessage() {
+//      if (!_hasWelcomed) {
+//         // Only show welcome message per activity instance
+//         _hasWelcomed = true;
+//         Utils.showOptionalMessage(this, R.string.lt_welcome_message);
+//      }
+//   }
 
    /**
     * figure out whether Google Play Services are available and act accordingly
@@ -275,6 +363,8 @@ public class LtMainActivity extends ActionBarActivity {
          return _myActiveTradesTab;
       case TRADE_HISTORY:
          return _myTradeHistoryTab;
+      case MY_ADS:
+         return _myAdsTab;
       default:
          return _myBuyBitcoinTab;
       }
@@ -300,7 +390,7 @@ public class LtMainActivity extends ActionBarActivity {
       public boolean onNoLtConnection() {
          Utils.toastConnectionError(LtMainActivity.this);
          return true;
-      };
+      }
 
       @Override
       public void onLtTraderActicityNotification(long timestamp) {

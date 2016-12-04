@@ -1,3 +1,19 @@
+/*
+ * Copyright 2013, 2014 Megion Research & Development GmbH
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.mycelium.lt;
 
 import java.util.UUID;
@@ -8,7 +24,6 @@ import org.junit.Test;
 
 import com.google.common.io.BaseEncoding;
 import com.mrd.bitlib.crypto.HdKeyNode;
-import com.mrd.bitlib.crypto.HdKeyNode.KeyGenerationException;
 import com.mrd.bitlib.crypto.InMemoryPrivateKey;
 import com.mrd.bitlib.crypto.PublicKey;
 import com.mrd.bitlib.util.BitUtils;
@@ -24,7 +39,7 @@ public class MessageEncryptionTest {
    private static final String MESSAGE_THREE = "Hello World!Hello World!Hello World!Hello World!Hello World!Hello World!Hello World!Hello World!";
 
    @Test
-   public void testEncryptionDecryptionPositive() throws KeyGenerationException {
+   public void testEncryptionDecryptionPositive() {
       // Generate random trade session ID, encryption key and derive HMAC key
       UUID tradeSessionId = UUID.randomUUID();
 
@@ -43,7 +58,7 @@ public class MessageEncryptionTest {
    }
 
    @Test
-   public void testEncryptionDecryptionNegative() throws KeyGenerationException {
+   public void testEncryptionDecryptionNegative() {
       // Generate random trade session ID, encryption key and derive HMAC key
       UUID tradeSessionId = UUID.randomUUID();
 

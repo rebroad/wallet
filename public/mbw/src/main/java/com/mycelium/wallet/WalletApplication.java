@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -38,9 +38,10 @@ import java.util.Locale;
 
 import android.app.Application;
 import android.content.res.Configuration;
+import android.support.multidex.MultiDexApplication;
 import android.util.Log;
 
-public class WalletApplication extends Application {
+public class WalletApplication extends MultiDexApplication {
 
    @Override
    public void onCreate() {

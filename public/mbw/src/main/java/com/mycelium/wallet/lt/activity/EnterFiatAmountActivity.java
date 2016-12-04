@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 Megion Research and Development GmbH
+ * Copyright 2013, 2014 Megion Research and Development GmbH
  *
  * Licensed under the Microsoft Reference Source License (MS-RSL)
  *
@@ -126,12 +126,7 @@ public class EnterFiatAmountActivity extends Activity implements NumberEntryList
    }
 
    @Override
-   protected void onPause() {
-      super.onPause();
-   }
-
-   @Override
-   public void onEntryChanged(String entry) {
+   public void onEntryChanged(String entry, boolean wasSet) {
       updateUi();
    }
 
