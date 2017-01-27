@@ -240,7 +240,10 @@ public class ModernMain extends ActionBarActivity {
    private void checkTorState() {
       if (_mbwManager.getTorMode() == ServerEndpointType.Types.ONLY_TOR) {
          OrbotHelper obh = new OrbotHelper(this);
-         if (!obh.isOrbotRunning(this)) {
+         // only check for Orbot if the OS is older than AndroidN (SDK_INT==24),
+         // because the current check does not work any more
+         // see: https://github.com/mycelium-com/wallet/issues/288#issuecomment-257261708
+         if (!obh.isOrbotRunning(this) && android.os.Build.VERSION.SDK_INT < 24) {
             obh.requestOrbotStart(this);
          }
       }
@@ -418,9 +421,6 @@ public class ModernMain extends ActionBarActivity {
 
          // also fetch a new exchange rate, if necessary
          _mbwManager.getExchangeRateManager().requestOptionalRefresh();
-
-      } else if (itemId == R.id.miExplore) {
-         _mbwManager.get_exploreHelper().redirectToCoinmap(this);
       } else if (itemId == R.id.miHelp) {
          openMyceliumHelp();
       } else if (itemId == R.id.miAbout) {
@@ -469,10 +469,7 @@ public class ModernMain extends ActionBarActivity {
                startActivity(Intent.createChooser(intent, getResources().getString(R.string.share_transaction_history)));
             }
          }
-      } catch (IOException e) {
-         _toaster.toast("Export failed. Check your logs", false);
-         e.printStackTrace();
-      } catch (PackageManager.NameNotFoundException e) {
+      } catch (IOException | PackageManager.NameNotFoundException e) {
          _toaster.toast("Export failed. Check your logs", false);
          e.printStackTrace();
       }
